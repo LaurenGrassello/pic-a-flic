@@ -1,0 +1,269 @@
+openapi: 3.0.3
+info:
+  title: pic-a-flic API
+  version: "0.2.0"
+  description: |
+    Clean Slim + Doctrine API for pic-a-flic.
+    JWT-secured endpoints use Bearer tokens.
+servers:
+  - url: http://localhost:8080
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+        display_name: { type: string }
+        services:
+          type: array
+          items: { type: string, example: netflix }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 6 }
+    TokenResponse:
+      type: object
+      properties:
+        token: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string, format: email }
+        display_name: { type: string }
+    Movie:
+      type: object
+      properties:
+        id: { type: integer }
+        tmdbId: { type: integer }
+        title: { type: string }
+    FeedResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/Movie' }
+        count: { type: integer }
+    ChallengeResponse:
+      type: object
+      properties:
+        pick:
+          anyOf:
+            - $ref: '#/components/schemas/Movie'
+            - type: 'null'
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  env: { type: string }
+  /auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { description: Created }
+        '409': { description: Email already registered }
+  /auth/login:
+    post:
+      summary: Login and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Token issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { description: Invalid credentials }
+  /auth/me:
+    get:
+      security: [{ BearerAuth: [] }]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { description: Unauthorized }
+  /quiz:
+    get:
+      summary: Get onboarding quiz
+      responses:
+        '200': { description: OK }
+  /quiz/submit:
+    post:
+      security: [{ BearerAuth: [] }]
+      summary: Submit quiz answers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                answer_ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200': { description: OK }
+  /feed/for-you:
+    get:
+      security: [{ BearerAuth: [] }]
+      summary: Personalized feed (by services + region)
+      parameters:
+        - in: query
+          name: region
+          schema: { type: string, default: US }
+        - in: query
+          name: service
+          schema: { type: string, nullable: true }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedResponse' }
+  /feed/deck:
+    get:
+      security: [{ BearerAuth: [] }]
+      summary: Unswiped movies deck
+      parameters:
+        - in: query
+          name: region
+          schema: { type: string, default: US }
+        - in: query
+          name: service
+          schema: { type: string, nullable: true }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedResponse' }
+  /feed/challenge-me:
+    get:
+      security: [{ BearerAuth: [] }]
+      summary: Random pick based on your likes/services
+      parameters:
+        - in: query
+          name: region
+          schema: { type: string, default: US }
+        - in: query
+          name: service
+          schema: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChallengeResponse' }
+  /social/follow/{userId}:
+    post:
+      security: [{ BearerAuth: [] }]
+      summary: Follow a user
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+    delete:
+      security: [{ BearerAuth: [] }]
+      summary: Unfollow a user
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /social/swipe:
+    post:
+      security: [{ BearerAuth: [] }]
+      summary: Swipe like/dislike a movie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [movie_id, liked]
+              properties:
+                movie_id: { type: integer }
+                liked: { type: boolean }
+      responses:
+        '200': { description: OK }
+  /social/matches/{friendId}:
+    get:
+      security: [{ BearerAuth: [] }]
+      summary: Movies both you and friend liked
+      parameters:
+        - in: path
+          name: friendId
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedResponse' }
+  /admin/ingest-tmdb:
+    post:
+      summary: (Dev) Ingest a movie by TMDb ID
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [tmdb_id]
+              properties:
+                tmdb_id: { type: integer }
+      responses:
+        '200': { description: OK }

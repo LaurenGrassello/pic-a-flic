@@ -1,0 +1,323 @@
+{
+  "info": {
+    "name": "pic-a-flic API",
+    "_postman_id": "pica-20250913221858",
+    "description": "Requests for pic-a-flic API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/health",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Auth / Register",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\": \"dev@example.com\", \"password\": \"pass1234\", \"display_name\": \"Dev\", \"services\": [\"netflix\", \"prime\"]}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/auth/register",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "auth",
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Auth / Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\": \"dev@example.com\", \"password\": \"pass1234\"}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/auth/login",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Auth / Me",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/auth/me",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "auth",
+            "me"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Feed / For You",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/feed/for-you?region=US",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "feed",
+            "for-you"
+          ],
+          "query": [
+            {
+              "key": "region",
+              "value": "US"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Feed / Deck",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/feed/deck?region=US",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "feed",
+            "deck"
+          ],
+          "query": [
+            {
+              "key": "region",
+              "value": "US"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Feed / Challenge Me",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/feed/challenge-me?region=US",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "feed",
+            "challenge-me"
+          ],
+          "query": [
+            {
+              "key": "region",
+              "value": "US"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Social / Follow",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/social/follow/{{FRIEND_ID}}",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "social",
+            "follow",
+            "{{FRIEND_ID}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Social / Swipe",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"movie_id\": 1, \"liked\": true}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/social/swipe",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "social",
+            "swipe"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Social / Matches",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{TOKEN}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/social/matches/{{FRIEND_ID}}",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "social",
+            "matches",
+            "{{FRIEND_ID}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin / Ingest TMDb",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "tmdb_id",
+              "value": "603"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/admin/ingest-tmdb",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "admin",
+            "ingest-tmdb"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "TOKEN",
+      "value": ""
+    },
+    {
+      "key": "FRIEND_ID",
+      "value": ""
+    }
+  ]
+}

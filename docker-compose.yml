@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  db:
+    image: mariadb:10.11
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: picaflic
+    ports:
+      - "3307:3306"          # host:container (you connect on 3307 from host)
+    volumes:
+      - dbdata:/var/lib/mysql
+
+  app:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    working_dir: /var/www/html
+    volumes:
+      - ./api:/var/www/html
+    env_file:
+      - ./api/.env           # loads TMDB_API_KEY, DATABASE_URL, etc.
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+      DB_DSN: "mysql:host=db;dbname=picaflic;charset=utf8mb4"
+      DB_USER: "root"
+      DB_PASS: "password"
+      JWT_SECRET: "dev_secret_change_me"
+      JWT_TTL: "3600"
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+
+volumes:
+  dbdata:

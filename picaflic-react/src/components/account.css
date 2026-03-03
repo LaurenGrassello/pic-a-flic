@@ -1,0 +1,28 @@
+/* Optional spooky font (add <link> in index.html; see step 4) */
+:root { --btn-shadow: #e3e3e3; }
+
+.account-hero{
+  max-width: 820px;
+  margin: 4rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 16px;
+}
+
+.big-menu-btn{
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  background: #fff;
+  color: #111;
+  padding: 24px 16px;
+  border-radius: 16px;
+  box-shadow: 0 8px 0 var(--btn-shadow);
+  font-size: clamp(28px, 5vw, 48px);
+  font-family: "Creepster", system-ui, sans-serif; /* optional */
+  letter-spacing: 1px;
+  transition: transform .1s ease, box-shadow .1s ease;
+}
+.big-menu-btn:hover { transform: translateY(-1px); box-shadow: 0 9px 0 var(--btn-shadow); }
+.big-menu-btn:active{ transform: translateY(2px);  box-shadow: 0 6px 0 var(--btn-shadow); }
