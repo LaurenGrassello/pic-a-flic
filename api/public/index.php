@@ -1,20 +1,16 @@
 <?php
-declare(strict_types=1);
+declare (strict_types = 1);
 
-use PicaFlic\Bootstrap\AppBuilder;
+use Doctrine\ORM\EntityManager;
 use PicaFlic\Application\Controller\AuthController;
 use PicaFlic\Application\Controller\QuizController;
-use PicaFlic\Application\Controller\FeedController;
 use PicaFlic\Application\Controller\SocialController;
-use PicaFlic\Application\Controller\AdminController;
 use PicaFlic\Application\Middleware\JwtMiddleware;
+use PicaFlic\Bootstrap\AppBuilder;
 use PicaFlic\Infrastructure\Security\JwtService;
-use PicaFlic\Infrastructure\Tmdb\TmdbClient;
-use PicaFlic\Domain\Repository\MovieRepository;
 use PicaFlic\Infrastructure\Service\MailService;
-use Doctrine\ORM\EntityManager;
-use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Factory\AppFactory;
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -41,8 +37,7 @@ $app->addBodyParsingMiddleware();
 // ---------------------------------------------------------
 // CORS (allowlist from env: CORS_ALLOW_ORIGINS=a,b,c)
 // ---------------------------------------------------------
-$allowed = array_values(array_filter(array_map('trim', explode(',', $_ENV['CORS_ALLOW_ORIGINS']
-    ?? 'http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175'))));
+$allowed = array_values(array_filter(array_map('trim', explode(',', $_ENV['CORS_ALLOW_ORIGINS'] ?? 'http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175'))));
 
 $app->add(function (Request $req, $handler) use ($allowed) {
     $origin = $req->getHeaderLine('Origin');
@@ -61,32 +56,8 @@ $app->add(function (Request $req, $handler) use ($allowed) {
         ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
 });
 
-// Shared services
-$settings = $container->get('settings');
-
-/** @var EntityManager $em */
-$em = $container->get(EntityManager::class);
-
-// JWT (access token)
-$jwt    = new JwtService(
-    $settings['jwt']['secret'] ?? 'dev_secret_change_me',
-    (int)($settings['jwt']['ttl'] ?? 3600)
-);
-$authMw = new JwtMiddleware($jwt);
-
 // Preflight
 $app->options('/{routes:.+}', fn($req, $res) => $res->withStatus(204));
-
-$app->get('/title/{kind}/{id}/providers', function ($req, $res, $args) use ($container) {
-    $em   = $container->get(\Doctrine\ORM\EntityManager::class);
-    $tmdb = $container->get(\PicaFlic\Infrastructure\Tmdb\TmdbClient::class);
-    $ctrl = new \PicaFlic\Application\Controller\FeedController($em, $tmdb);
-    return $ctrl->titleProviders($req, $res, $args);
-})->add($authMw);
-
-// Search
-$feed = $container->get(\PicaFlic\Application\Controller\FeedController::class);
-$app->get('/search', [$feed,'search'])->add($authMw);
 
 // ---------------------------------------------------------
 // Shared services
@@ -117,9 +88,9 @@ $adminGate = function (Request $req, $handler) use ($adminKey, $app) {
 // Health
 // ---------------------------------------------------------
 $app->get('/health', function ($req, $res) use ($container) {
-    $em   = $container->get(\Doctrine\ORM\EntityManager::class);
+    $em = $container->get(\Doctrine\ORM\EntityManager::class);
     $conn = $em->getConnection();
-    $db   = $conn->fetchOne('SELECT DATABASE()');
+    $db = $conn->fetchOne('SELECT DATABASE()');
     $host = $conn->getParams()['host'] ?? 'n/a';
 
     $payload = ['ok' => true, 'env' => $_ENV['APP_ENV'] ?? 'dev', 'db' => ['host' => $host, 'name' => $db]];
@@ -137,63 +108,50 @@ $app->post('/admin/ingest-tmdb', [$admin, 'ingestTmdb'])->add($adminGate);
 // Auth
 // ---------------------------------------------------------
 $mailer = $container->get(MailService::class);
-$auth   = new AuthController($em, $jwt, $mailer);
+$auth = new AuthController($em, $jwt, $mailer);
 $app->post('/auth/register', [$auth, 'register']);
-$app->post('/auth/login',    [$auth, 'login']);
-$app->get('/auth/me',        [$auth, 'me'])->add($authMw);
+$app->post('/auth/login', [$auth, 'login']);
+$app->get('/auth/me', [$auth, 'me'])->add($authMw);
 $app->post('/auth/refresh', [$auth, 'refresh']);
-$app->post('/auth/logout',  [$auth, 'logout']);
-$app->post('/auth/forgot',  [$auth, 'forgot']);
-$app->post('/auth/reset',   [$auth, 'reset']);
+$app->post('/auth/logout', [$auth, 'logout']);
+$app->post('/auth/forgot', [$auth, 'forgot']);
+$app->post('/auth/reset', [$auth, 'reset']);
 
 // Profile
 $profile = $container->get(\PicaFlic\Application\Controller\ProfileController::class);
-$app->get('/profile',              [$profile, 'getProfile'])->add($authMw);
-$app->put('/profile/password',     [$profile, 'changePassword'])->add($authMw);
-$app->put('/profile/services',     [$profile, 'setServices'])->add($authMw);
+$app->get('/profile', [$profile, 'getProfile'])->add($authMw);
+$app->put('/profile/password', [$profile, 'changePassword'])->add($authMw);
+$app->put('/profile/services', [$profile, 'setServices'])->add($authMw);
 
 // ---------------------------------------------------------
 // Quiz
 // ---------------------------------------------------------
 $quiz = new QuizController();
-$app->get('/quiz',         [$quiz, 'get']);
+$app->get('/quiz', [$quiz, 'get']);
 $app->post('/quiz/submit', [$quiz, 'submit'])->add($authMw);
 
 // ---------------------------------------------------------
 // Social
 // ---------------------------------------------------------
 $social = new SocialController($em);
-$app->post('/social/follow/{userId}',   [$social, 'follow'])->add($authMw);
+$app->post('/social/follow/{userId}', [$social, 'follow'])->add($authMw);
 $app->delete('/social/follow/{userId}', [$social, 'unfollow'])->add($authMw);
-$app->post('/social/swipe',             [$social, 'swipe'])->add($authMw);
+$app->post('/social/swipe', [$social, 'swipe'])->add($authMw);
 $app->get('/social/matches/{friendId}', [$social, 'matches'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
 // ---------------------------------------------------------
 // Deck
-$app->get('/feed/deck', function ($req, $res) use ($container) {
-    $em   = $container->get(EntityManager::class);
-    $tmdb = $container->get(TmdbClient::class);
-    $ctrl = new FeedController($em, $tmdb);
-    return $ctrl->deck($req, $res);
-})->add($authMw);
+$feed = $container->get(\PicaFlic\Application\Controller\FeedController::class);
 
-// For You
-$app->get('/feed/for-you', function ($req, $res) use ($container) {
-  $em   = $container->get(EntityManager::class);
-  $tmdb = $container->get(TmdbClient::class);
-  $ctrl = new FeedController($em, $tmdb);
-  return $ctrl->forYou($req, $res);
-})->add($authMw);
+$app->get('/search', [$feed, 'search'])->add($authMw);
+$app->get('/title/{kind}/{id}/providers', [$feed, 'titleProviders'])->add($authMw);
+$app->get('/titles/{kind}/{tmdbId}', [$feed, 'details'])->add($authMw);
 
-// Challenge Me
-$app->get('/feed/challenge-me', function ($req, $res) use ($container) {
-    $em   = $container->get(EntityManager::class);
-    $tmdb = $container->get(TmdbClient::class);
-    $ctrl = new FeedController($em, $tmdb);
-    return $ctrl->challenge($req, $res);
-})->add($authMw);
+$app->get('/feed/deck', [$feed, 'deck'])->add($authMw);
+$app->get('/feed/for-you', [$feed, 'forYou'])->add($authMw);
+$app->get('/feed/challenge-me', [$feed, 'challenge'])->add($authMw);
 
 // ---------------------------------------------------------
 // JSON error handler (must also add CORS headers)

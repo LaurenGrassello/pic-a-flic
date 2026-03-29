@@ -680,4 +680,130 @@ final class FeedController
 
         return $this->json($res, $rows);
     }
+
+    public function details(Request $req, Response $res, array $args): Response
+    {
+        $kind = strtolower((string) ($args['kind'] ?? 'movie'));
+        $kind = $kind === 'tv' ? 'tv' : 'movie';
+
+        $tmdbId = (int) ($args['tmdbId'] ?? 0);
+        if ($tmdbId <= 0) {
+            return $this->json($res, ['error' => 'Bad tmdbId'], 400);
+        }
+
+        $region = $req->getQueryParams()['region'] ?? 'US';
+        $conn = $this->em->getConnection();
+        $schema = $conn->createSchemaManager();
+
+        $table = $kind === 'tv' ? 'tv_shows' : 'movies';
+        if (!$schema->tablesExist([$table])) {
+            return $this->json($res, ['error' => 'Table not found'], 404);
+        }
+
+        $cols = [];
+        try {
+            $cols = array_map(
+                fn($c) => strtolower($c->getName()),
+                $schema->listTableColumns($table)
+            );
+        } catch (\Throwable $e) {
+            $cols = [];
+        }
+
+        $pick = function (array $candidates) use ($cols): ?string {
+            foreach ($candidates as $candidate) {
+                if (in_array(strtolower($candidate), $cols, true)) {
+                    return $candidate;
+                }
+            }
+            return null;
+        };
+
+        $idCol = $pick(['id']) ?? 'id';
+        $tmdbCol = $pick(['tmdb_id', 'id']) ?? 'id';
+        $titleCol = $kind === 'tv'
+        ? ($pick(['name', 'title']) ?? 'name')
+        : ($pick(['title', 'name']) ?? 'title');
+        $releaseCol = $kind === 'tv'
+        ? $pick(['first_air_date', 'air_date', 'release_date', 'year'])
+        : $pick(['release_date', 'released', 'release', 'release_year', 'year']);
+        $posterCol = $pick(['poster_path', 'poster', 'poster_url', 'posterurl']);
+        $overviewCol = $pick(['overview', 'summary', 'description']);
+
+        $selects = [
+            "`$idCol` AS id",
+            "`$tmdbCol` AS tmdb_id",
+            "`$titleCol` AS title",
+        ];
+
+        if ($releaseCol) {
+            $releaseExpr = match ($releaseCol) {
+                'release_date', 'released', 'release', 'first_air_date', 'air_date' => "`$releaseCol`",
+                'release_year', 'year' => "STR_TO_DATE(CONCAT(`$releaseCol`, '-01-01'), '%Y-%m-%d')",
+                default
+                => "NULL",
+            };
+
+            $selects[] = "{$releaseExpr} AS release_date";
+        } else {
+            $selects[] = "NULL AS release_date";
+        }
+
+        $selects[] = $posterCol ? "`$posterCol` AS poster_path" : "NULL AS poster_path";
+        $selects[] = $overviewCol ? "`$overviewCol` AS overview" : "NULL AS overview";
+
+        $sql = sprintf(
+            "SELECT %s FROM %s WHERE `%s` = ? LIMIT 1",
+            implode(', ', $selects),
+            $table,
+            $tmdbCol
+        );
+
+        $row = null;
+        try {
+            $row = $conn->fetchAssociative($sql, [$tmdbId]) ?: null;
+        } catch (\Throwable $e) {
+            $row = null;
+        }
+
+        $tmdbDetails = $this->tmdb->details($kind, $tmdbId);
+        $providers = $this->tmdb->titleProviders($kind, $tmdbId, $region);
+
+        $localId = $this->resolveLocalId($kind, $tmdbId);
+
+        $title = $row['title'] ?? null;
+        if (!$title) {
+            $title = $kind === 'tv'
+            ? ($tmdbDetails['name'] ?? null)
+            : ($tmdbDetails['title'] ?? null);
+        }
+
+        $releaseDate = $row['release_date'] ?? null;
+        if (!$releaseDate) {
+            $releaseDate = $kind === 'tv'
+            ? ($tmdbDetails['first_air_date'] ?? null)
+            : ($tmdbDetails['release_date'] ?? null);
+        }
+
+        $posterPath = $row['poster_path'] ?? null;
+        if (!$posterPath) {
+            $posterPath = $tmdbDetails['poster_path'] ?? null;
+        }
+
+        $overview = $row['overview'] ?? null;
+        if (!$overview) {
+            $overview = $tmdbDetails['overview'] ?? null;
+        }
+
+        return $this->json($res, [
+            'id' => isset($row['id']) ? (int) $row['id'] : $localId,
+            'tmdb_id' => isset($row['tmdb_id']) ? (int) $row['tmdb_id'] : $tmdbId,
+            'is_tv' => $kind === 'tv' ? 1 : 0,
+            'title' => $title,
+            'release_date' => $releaseDate,
+            'poster_path' => $posterPath,
+            'overview' => $overview,
+            'providers' => $providers,
+        ]);
+    }
 }
