@@ -9,6 +9,8 @@ use PicaFlic\Domain\Entity\Friendship;
 use PicaFlic\Domain\Entity\Movie;
 use PicaFlic\Domain\Entity\Swipe;
 use PicaFlic\Domain\Entity\User;
+use PicaFlic\Domain\Entity\Watchlist;
+use PicaFlic\Domain\Entity\WatchlistMember;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -271,6 +273,167 @@ final class SocialController
         $this->em->flush();
 
         return $this->json($res, ['ok' => true]);
+    }
+
+    private function areAcceptedFriends(User $a, User $b): bool
+    {
+        $friendship = $this->findFriendshipBetween($a, $b);
+        return $friendship !== null && $friendship->getStatus() === 'accepted';
+    }
+
+    public function createWatchlist(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $name = trim((string) ($data['name'] ?? ''));
+        $memberIds = array_values(array_unique(array_map('intval', (array) ($data['member_ids'] ?? []))));
+
+        if ($name === '') {
+            return $this->json($res, ['error' => 'Watchlist name is required'], 422);
+        }
+
+        $memberIds = array_values(array_filter($memberIds, fn(int $id) => $id > 0 && $id !== $meId));
+
+        $allMemberIds = array_values(array_unique(array_merge([$meId], $memberIds)));
+        $totalMembers = count($allMemberIds);
+
+        if ($totalMembers < 2) {
+            return $this->json($res, ['error' => 'A shared watchlist must have at least 2 members'], 422);
+        }
+
+        if ($totalMembers > 5) {
+            return $this->json($res, ['error' => 'A shared watchlist can have at most 5 members'], 422);
+        }
+
+        $members = [$meId => $me];
+
+        foreach ($memberIds as $memberId) {
+            /** @var User|null $user */
+            $user = $this->em->find(User::class, $memberId);
+            if (!$user) {
+                return $this->json($res, ['error' => "User {$memberId} not found"], 404);
+            }
+
+            if (!$this->areAcceptedFriends($me, $user)) {
+                return $this->json($res, ['error' => "User {$memberId} is not an accepted friend"], 422);
+            }
+
+            $members[$memberId] = $user;
+        }
+
+        $watchlist = new Watchlist($me, $name);
+        $this->em->persist($watchlist);
+        $this->em->flush();
+
+        foreach ($members as $member) {
+            $this->em->persist(new WatchlistMember($watchlist, $member));
+        }
+
+        $this->em->flush();
+
+        return $this->json($res, [
+            'ok' => true,
+            'watchlist' => [
+                'id' => $watchlist->getId(),
+                'name' => $watchlist->getName(),
+                'created_by' => $watchlist->getCreatedBy()->getId(),
+                'member_count' => count($members),
+            ],
+        ], 201);
+    }
+
+    public function watchlists(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        $qb = $this->em->createQueryBuilder();
+        $watchlists = $qb->select('w', 'creator')
+            ->from(Watchlist::class, 'w')
+            ->join('w.createdBy', 'creator')
+            ->join(WatchlistMember::class, 'wm', 'WITH', 'wm.watchlist = w')
+            ->where('wm.user = :uid')
+            ->setParameter('uid', $meId)
+            ->getQuery()
+            ->getResult();
+
+        $results = [];
+        foreach ($watchlists as $watchlist) {
+            $countQb = $this->em->createQueryBuilder();
+            $memberCount = (int) $countQb->select('COUNT(wm2.id)')
+                ->from(WatchlistMember::class, 'wm2')
+                ->where('wm2.watchlist = :watchlist')
+                ->setParameter('watchlist', $watchlist)
+                ->getQuery()
+                ->getSingleScalarResult();
+
+            $results[] = [
+                'id' => $watchlist->getId(),
+                'name' => $watchlist->getName(),
+                'created_by' => $watchlist->getCreatedBy()->getId(),
+                'member_count' => $memberCount,
+            ];
+        }
+
+        return $this->json($res, ['results' => $results]);
+    }
+
+    public function watchlist(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+        if (!$watchlist) {
+            return $this->json($res, ['error' => 'Watchlist not found'], 404);
+        }
+
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $memberships = $memberRepo->findBy(['watchlist' => $watchlist]);
+
+        $isMember = false;
+        $members = [];
+
+        foreach ($memberships as $membership) {
+            $user = $membership->getUser();
+            if ($user->getId() === $meId) {
+                $isMember = true;
+            }
+
+            $members[] = [
+                'id' => $user->getId(),
+                'display_name' => $user->getDisplayName(),
+                'email' => $user->getEmail(),
+            ];
+        }
+
+        if (!$isMember) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        return $this->json($res, [
+            'id' => $watchlist->getId(),
+            'name' => $watchlist->getName(),
+            'created_by' => $watchlist->getCreatedBy()->getId(),
+            'members' => $members,
+        ]);
     }
 
     /** POST /social/swipe  body: { "movie_id": 123, "liked": true } */

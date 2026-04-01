@@ -143,6 +143,9 @@ $app->get('/social/friends', [$social, 'friends'])->add($authMw);
 $app->post('/social/friends/request/{userId}', [$social, 'requestFriend'])->add($authMw);
 $app->post('/social/friends/accept/{userId}', [$social, 'acceptFriend'])->add($authMw);
 $app->delete('/social/friends/{userId}', [$social, 'removeFriend'])->add($authMw);
+$app->post('/social/watchlists', [$social, 'createWatchlist'])->add($authMw);
+$app->get('/social/watchlists', [$social, 'watchlists'])->add($authMw);
+$app->get('/social/watchlists/{watchlistId}', [$social, 'watchlist'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
