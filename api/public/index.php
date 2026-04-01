@@ -138,6 +138,11 @@ $app->post('/social/follow/{userId}', [$social, 'follow'])->add($authMw);
 $app->delete('/social/follow/{userId}', [$social, 'unfollow'])->add($authMw);
 $app->post('/social/swipe', [$social, 'swipe'])->add($authMw);
 $app->get('/social/matches/{friendId}', [$social, 'matches'])->add($authMw);
+$app->get('/social/users/search', [$social, 'searchUsers'])->add($authMw);
+$app->get('/social/friends', [$social, 'friends'])->add($authMw);
+$app->post('/social/friends/request/{userId}', [$social, 'requestFriend'])->add($authMw);
+$app->post('/social/friends/accept/{userId}', [$social, 'acceptFriend'])->add($authMw);
+$app->delete('/social/friends/{userId}', [$social, 'removeFriend'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
