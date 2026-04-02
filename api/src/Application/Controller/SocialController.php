@@ -11,6 +11,7 @@ use PicaFlic\Domain\Entity\Swipe;
 use PicaFlic\Domain\Entity\User;
 use PicaFlic\Domain\Entity\Watchlist;
 use PicaFlic\Domain\Entity\WatchlistMember;
+use PicaFlic\Domain\Entity\WatchlistMovie;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -531,12 +532,75 @@ final class SocialController
             ];
         }
 
+        $matchCount = count($matchedUsers);
+        $isMatch = $matchCount >= 2;
+
+        if ($isMatch) {
+            $watchlistMovieRepo = $this->em->getRepository(WatchlistMovie::class);
+            $existingWatchlistMovie = $watchlistMovieRepo->findOneBy([
+                'watchlist' => $watchlist,
+                'movie' => $movie,
+            ]);
+
+            if (!$existingWatchlistMovie) {
+                $this->em->persist(new WatchlistMovie($watchlist, $movie));
+                $this->em->flush();
+            }
+        }
+
         return $this->json($res, [
             'ok' => true,
-            'match' => count($matchedUsers) >= 2,
+            'match' => $isMatch,
             'matched_users' => $matchedUsers,
-            'match_count' => count($matchedUsers),
+            'match_count' => $matchCount,
         ]);
+    }
+
+    public function watchlistMovies(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+        if (!$watchlist) {
+            return $this->json($res, ['error' => 'Watchlist not found'], 404);
+        }
+
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $memberships = $memberRepo->findBy(['watchlist' => $watchlist]);
+
+        $isMember = false;
+        foreach ($memberships as $membership) {
+            if ($membership->getUser()->getId() === $meId) {
+                $isMember = true;
+                break;
+            }
+        }
+
+        if (!$isMember) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        $repo = $this->em->getRepository(WatchlistMovie::class);
+        $rows = $repo->findBy(['watchlist' => $watchlist]);
+
+        $results = [];
+        foreach ($rows as $row) {
+            $movie = $row->getMovie();
+            $results[] = [
+                'id' => $movie->getId(),
+                'title' => method_exists($movie, 'getTitle') ? $movie->getTitle() : null,
+                'tmdb_id' => method_exists($movie, 'getTmdbId') ? $movie->getTmdbId() : null,
+                'poster_path' => method_exists($movie, 'getPosterPath') ? $movie->getPosterPath() : null,
+            ];
+        }
+
+        return $this->json($res, ['results' => $results]);
     }
 
     /** POST /social/swipe  body: { "movie_id": 123, "liked": true } */
