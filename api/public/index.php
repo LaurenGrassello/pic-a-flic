@@ -146,6 +146,7 @@ $app->delete('/social/friends/{userId}', [$social, 'removeFriend'])->add($authMw
 $app->post('/social/watchlists', [$social, 'createWatchlist'])->add($authMw);
 $app->get('/social/watchlists', [$social, 'watchlists'])->add($authMw);
 $app->get('/social/watchlists/{watchlistId}', [$social, 'watchlist'])->add($authMw);
+$app->post('/social/watchlists/{watchlistId}/swipe', [$social, 'watchlistSwipe'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)

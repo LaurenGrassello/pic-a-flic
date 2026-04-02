@@ -436,6 +436,109 @@ final class SocialController
         ]);
     }
 
+    public function watchlistSwipe(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+
+        if (!$me || !$watchlist) {
+            return $this->json($res, ['error' => 'Not found'], 404);
+        }
+
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $memberships = $memberRepo->findBy(['watchlist' => $watchlist]);
+
+        $memberUsers = [];
+        $isMember = false;
+
+        foreach ($memberships as $membership) {
+            $user = $membership->getUser();
+            $memberUsers[] = $user;
+
+            if ($user->getId() === $meId) {
+                $isMember = true;
+            }
+        }
+
+        if (!$isMember) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $movieId = (int) ($data['movie_id'] ?? 0);
+        $liked = (bool) ($data['liked'] ?? false);
+
+        /** @var Movie|null $movie */
+        $movie = $this->em->find(Movie::class, $movieId);
+        if (!$movie) {
+            return $this->json($res, ['error' => 'Movie not found'], 404);
+        }
+
+        $swipeRepo = $this->em->getRepository(Swipe::class);
+        $existing = $swipeRepo->findOneBy([
+            'user' => $me,
+            'movie' => $movie,
+        ]);
+
+        if ($existing) {
+            $refLiked = new \ReflectionProperty(Swipe::class, 'liked');
+            $refLiked->setAccessible(true);
+            $refLiked->setValue($existing, $liked);
+        } else {
+            $this->em->persist(new Swipe($me, $movie, $liked));
+        }
+
+        $this->em->flush();
+
+        if (!$liked) {
+            return $this->json($res, [
+                'ok' => true,
+                'match' => false,
+                'matched_users' => [],
+            ]);
+        }
+
+        $memberIds = array_map(fn(User $user) => $user->getId(), $memberUsers);
+
+        $qb = $this->em->createQueryBuilder();
+        $matchedSwipes = $qb->select('s', 'u')
+            ->from(Swipe::class, 's')
+            ->join('s.user', 'u')
+            ->where('s.movie = :movie')
+            ->andWhere('s.liked = true')
+            ->andWhere('u.id IN (:memberIds)')
+            ->setParameter('movie', $movie)
+            ->setParameter('memberIds', $memberIds)
+            ->getQuery()
+            ->getResult();
+
+        $matchedUsers = [];
+        foreach ($matchedSwipes as $swipe) {
+            $user = $swipe->getUser();
+            $matchedUsers[] = [
+                'id' => $user->getId(),
+                'display_name' => $user->getDisplayName(),
+                'email' => $user->getEmail(),
+            ];
+        }
+
+        return $this->json($res, [
+            'ok' => true,
+            'match' => count($matchedUsers) >= 2,
+            'matched_users' => $matchedUsers,
+            'match_count' => count($matchedUsers),
+        ]);
+    }
+
     /** POST /social/swipe  body: { "movie_id": 123, "liked": true } */
     public function swipe(Request $req, Response $res): Response
     {

@@ -1,5 +1,5 @@
 <?php
-declare(strict_types=1);
+declare (strict_types = 1);
 
 namespace PicaFlic\Domain\Entity;
 
@@ -31,5 +31,20 @@ class Swipe
         $this->movie = $movie;
         $this->liked = $liked;
         $this->createdAt = new \DateTimeImmutable();
+    }
+
+    public function getUser(): User
+    {
+        return $this->user;
+    }
+
+    public function getMovie(): Movie
+    {
+        return $this->movie;
+    }
+
+    public function isLiked(): bool
+    {
+        return $this->liked;
     }
 }
