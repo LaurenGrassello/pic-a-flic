@@ -148,6 +148,10 @@ $app->get('/social/watchlists', [$social, 'watchlists'])->add($authMw);
 $app->get('/social/watchlists/{watchlistId}', [$social, 'watchlist'])->add($authMw);
 $app->post('/social/watchlists/{watchlistId}/swipe', [$social, 'watchlistSwipe'])->add($authMw);
 $app->get('/social/watchlists/{watchlistId}/movies', [$social, 'watchlistMovies'])->add($authMw);
+$app->post('/social/preferences', [$social, 'setPreference'])->add($authMw);
+$app->get('/social/watchlists/{watchlistId}/deck', [$social, 'watchlistDeck'])->add($authMw);
+$app->get('/social/preferences/liked', [$social, 'likedMovies'])->add($authMw);
+$app->get('/social/preferences/disliked', [$social, 'dislikedMovies'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
