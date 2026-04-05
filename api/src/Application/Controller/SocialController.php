@@ -11,6 +11,7 @@ use PicaFlic\Domain\Entity\Swipe;
 use PicaFlic\Domain\Entity\User;
 use PicaFlic\Domain\Entity\UserMoviePreference;
 use PicaFlic\Domain\Entity\Watchlist;
+use PicaFlic\Domain\Entity\WatchlistInvite;
 use PicaFlic\Domain\Entity\WatchlistMember;
 use PicaFlic\Domain\Entity\WatchlistMovie;
 use PicaFlic\Domain\Entity\WatchlistSwipe;
@@ -307,18 +308,16 @@ final class SocialController
 
         $memberIds = array_values(array_filter($memberIds, fn(int $id) => $id > 0 && $id !== $meId));
 
-        $allMemberIds = array_values(array_unique(array_merge([$meId], $memberIds)));
-        $totalMembers = count($allMemberIds);
-
-        if ($totalMembers < 2) {
-            return $this->json($res, ['error' => 'A shared watchlist must have at least 2 members'], 422);
+        $totalPeople = 1 + count($memberIds);
+        if ($totalPeople < 2) {
+            return $this->json($res, ['error' => 'A shared watchlist must include at least 1 invited friend'], 422);
         }
 
-        if ($totalMembers > 5) {
-            return $this->json($res, ['error' => 'A shared watchlist can have at most 5 members'], 422);
+        if ($totalPeople > 5) {
+            return $this->json($res, ['error' => 'A shared watchlist can include at most 5 total people'], 422);
         }
 
-        $members = [$meId => $me];
+        $invitedUsers = [];
 
         foreach ($memberIds as $memberId) {
             /** @var User|null $user */
@@ -331,15 +330,19 @@ final class SocialController
                 return $this->json($res, ['error' => "User {$memberId} is not an accepted friend"], 422);
             }
 
-            $members[$memberId] = $user;
+            $invitedUsers[$memberId] = $user;
         }
 
         $watchlist = new Watchlist($me, $name);
         $this->em->persist($watchlist);
         $this->em->flush();
 
-        foreach ($members as $member) {
-            $this->em->persist(new WatchlistMember($watchlist, $member));
+        // creator becomes the only immediate member
+        $this->em->persist(new WatchlistMember($watchlist, $me));
+
+        // selected friends become invites
+        foreach ($invitedUsers as $invitedUser) {
+            $this->em->persist(new WatchlistInvite($watchlist, $invitedUser, $me, 'pending'));
         }
 
         $this->em->flush();
@@ -350,7 +353,8 @@ final class SocialController
                 'id' => $watchlist->getId(),
                 'name' => $watchlist->getName(),
                 'created_by' => $watchlist->getCreatedBy()->getId(),
-                'member_count' => count($members),
+                'member_count' => 1,
+                'invite_count' => count($invitedUsers),
             ],
         ], 201);
     }
@@ -908,6 +912,207 @@ final class SocialController
 
         $rows = $qb->getQuery()->getArrayResult();
         return $this->json($res, ['results' => $rows, 'count' => count($rows)]);
+    }
+
+    public function inviteToWatchlist(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+
+        if (!$me || !$watchlist) {
+            return $this->json($res, ['error' => 'Not found'], 404);
+        }
+
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $memberships = $memberRepo->findBy(['watchlist' => $watchlist]);
+
+        $isMember = false;
+        $existingMemberIds = [];
+
+        foreach ($memberships as $membership) {
+            $user = $membership->getUser();
+            $existingMemberIds[] = $user->getId();
+
+            if ($user->getId() === $meId) {
+                $isMember = true;
+            }
+        }
+
+        if (!$isMember) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $invitedUserId = (int) ($data['user_id'] ?? 0);
+
+        if ($invitedUserId <= 0 || $invitedUserId === $meId) {
+            return $this->json($res, ['error' => 'Invalid invited user'], 422);
+        }
+
+        /** @var User|null $invitedUser */
+        $invitedUser = $this->em->find(User::class, $invitedUserId);
+        if (!$invitedUser) {
+            return $this->json($res, ['error' => 'Invited user not found'], 404);
+        }
+
+        if (in_array($invitedUserId, $existingMemberIds, true)) {
+            return $this->json($res, ['error' => 'User is already a member'], 409);
+        }
+
+        if (!$this->areAcceptedFriends($me, $invitedUser)) {
+            return $this->json($res, ['error' => 'User must be an accepted friend'], 422);
+        }
+
+        $inviteRepo = $this->em->getRepository(WatchlistInvite::class);
+        $existingInvite = $inviteRepo->findOneBy([
+            'watchlist' => $watchlist,
+            'invitedUser' => $invitedUser,
+        ]);
+
+        if ($existingInvite && $existingInvite->getStatus() === 'pending') {
+            return $this->json($res, ['error' => 'Invite already pending'], 409);
+        }
+
+        if ($existingInvite) {
+            $existingInvite->setStatus('pending');
+        } else {
+            $this->em->persist(new WatchlistInvite($watchlist, $invitedUser, $me, 'pending'));
+        }
+
+        $this->em->flush();
+
+        return $this->json($res, [
+            'ok' => true,
+            'status' => 'pending',
+        ], 201);
+    }
+
+    public function watchlistInvites(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $repo = $this->em->getRepository(WatchlistInvite::class);
+        $invites = $repo->findBy([
+            'invitedUser' => $me,
+            'status' => 'pending',
+        ]);
+
+        $results = [];
+        foreach ($invites as $invite) {
+            $watchlist = $invite->getWatchlist();
+            $invitedBy = $invite->getInvitedByUser();
+
+            $results[] = [
+                'id' => $invite->getId(),
+                'watchlist_id' => $watchlist->getId(),
+                'watchlist_name' => $watchlist->getName(),
+                'invited_by_user_id' => $invitedBy->getId(),
+                'invited_by_name' => $invitedBy->getDisplayName(),
+                'status' => $invite->getStatus(),
+            ];
+        }
+
+        return $this->json($res, ['results' => $results]);
+    }
+
+    public function acceptWatchlistInvite(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $inviteId = (int) ($args['inviteId'] ?? 0);
+
+        if ($meId <= 0 || $inviteId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        /** @var WatchlistInvite|null $invite */
+        $invite = $this->em->find(WatchlistInvite::class, $inviteId);
+
+        if (!$me || !$invite) {
+            return $this->json($res, ['error' => 'Not found'], 404);
+        }
+
+        if ($invite->getInvitedUser()->getId() !== $meId) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        if ($invite->getStatus() !== 'pending') {
+            return $this->json($res, ['error' => 'Invite is no longer pending'], 409);
+        }
+
+        $watchlist = $invite->getWatchlist();
+
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $existingMember = $memberRepo->findOneBy([
+            'watchlist' => $watchlist,
+            'user' => $me,
+        ]);
+
+        if (!$existingMember) {
+            $this->em->persist(new WatchlistMember($watchlist, $me));
+        }
+
+        $invite->setStatus('accepted');
+        $this->em->flush();
+
+        return $this->json($res, [
+            'ok' => true,
+            'status' => 'accepted',
+        ]);
+    }
+
+    public function declineWatchlistInvite(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $inviteId = (int) ($args['inviteId'] ?? 0);
+
+        if ($meId <= 0 || $inviteId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        /** @var WatchlistInvite|null $invite */
+        $invite = $this->em->find(WatchlistInvite::class, $inviteId);
+
+        if (!$me || !$invite) {
+            return $this->json($res, ['error' => 'Not found'], 404);
+        }
+
+        if ($invite->getInvitedUser()->getId() !== $meId) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        if ($invite->getStatus() !== 'pending') {
+            return $this->json($res, ['error' => 'Invite is no longer pending'], 409);
+        }
+
+        $invite->setStatus('declined');
+        $this->em->flush();
+
+        return $this->json($res, [
+            'ok' => true,
+            'status' => 'declined',
+        ]);
     }
 
     private function json(Response $res, array $payload, int $status = 200): Response
