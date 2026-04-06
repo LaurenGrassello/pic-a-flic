@@ -25,7 +25,48 @@ final class FeedController
     /** GET /feed/for-you?limit=60&page=1&providers=netflix|disney */
     public function forYou(Request $req, Response $res): Response
     {
-        return $this->mixedFeed($req, $res, order: 'popularity');
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $providerIds = $this->getUserProviderIds($me);
+
+        $conn = $this->em->getConnection();
+
+        if (!empty($providerIds)) {
+            $sql = "
+            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+            FROM movies m
+            INNER JOIN title_providers tp ON tp.movie_id = m.id
+            WHERE tp.provider_id IN (:providerIds)
+            ORDER BY m.id DESC
+            LIMIT 60
+        ";
+
+            $rows = $conn->executeQuery(
+                $sql,
+                ['providerIds' => $providerIds],
+                ['providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER]
+            )->fetchAllAssociative();
+        } else {
+            // skipped setup → fallback to current all-services behavior
+            $rows = $conn->fetchAllAssociative("
+            SELECT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+            FROM movies m
+            ORDER BY m.id DESC
+            LIMIT 60
+        ");
+        }
+
+        $res->getBody()->write(json_encode($rows));
+        return $res->withHeader('Content-Type', 'application/json');
     }
 
     /** GET /feed/deck ... (newer first) */
@@ -805,5 +846,16 @@ final class FeedController
             'overview' => $overview,
             'providers' => $providers,
         ]);
+    }
+
+    private function getUserProviderIds(User $user): array
+    {
+        $repo = $this->em->getRepository(\PicaFlic\Domain\Entity\UserStreamingService::class);
+        $rows = $repo->findBy(['user' => $user]);
+
+        return array_values(array_unique(array_map(
+            fn(\PicaFlic\Domain\Entity\UserStreamingService $row) => $row->getProviderId(),
+            $rows
+        )));
     }
 }

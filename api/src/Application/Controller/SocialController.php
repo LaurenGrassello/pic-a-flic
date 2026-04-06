@@ -10,6 +10,7 @@ use PicaFlic\Domain\Entity\Movie;
 use PicaFlic\Domain\Entity\Swipe;
 use PicaFlic\Domain\Entity\User;
 use PicaFlic\Domain\Entity\UserMoviePreference;
+use PicaFlic\Domain\Entity\UserStreamingService;
 use PicaFlic\Domain\Entity\Watchlist;
 use PicaFlic\Domain\Entity\WatchlistInvite;
 use PicaFlic\Domain\Entity\WatchlistMember;
@@ -359,6 +360,48 @@ final class SocialController
         ], 201);
     }
 
+    private function getUserProviderIds(User $user): array
+    {
+        $repo = $this->em->getRepository(UserStreamingService::class);
+        $rows = $repo->findBy(['user' => $user]);
+
+        return array_values(array_unique(array_map(
+            fn(UserStreamingService $row) => $row->getProviderId(),
+            $rows
+        )));
+    }
+
+    private function getWatchlistCommonProviderIds(Watchlist $watchlist): array
+    {
+        $memberRepo = $this->em->getRepository(WatchlistMember::class);
+        $memberships = $memberRepo->findBy(['watchlist' => $watchlist]);
+
+        $allProviderSets = [];
+
+        foreach ($memberships as $membership) {
+            $providerIds = $this->getUserProviderIds($membership->getUser());
+
+            // if a member has no selected providers, treat as no overlap for now
+            if (empty($providerIds)) {
+                return [];
+            }
+
+            $allProviderSets[] = $providerIds;
+        }
+
+        if (empty($allProviderSets)) {
+            return [];
+        }
+
+        $common = array_shift($allProviderSets);
+
+        foreach ($allProviderSets as $providerSet) {
+            $common = array_values(array_intersect($common, $providerSet));
+        }
+
+        return array_values(array_unique($common));
+    }
+
     public function watchlists(Request $req, Response $res): Response
     {
         $meId = (int) $req->getAttribute('uid');
@@ -614,7 +657,7 @@ final class SocialController
 
         $limit = max(1, min(100, (int) ($req->getQueryParams()['limit'] ?? 40)));
 
-        // 1) get personal liked/disliked movie ids to always exclude
+// 1) personal liked/disliked always excluded
         $prefRepo = $this->em->getRepository(UserMoviePreference::class);
         $prefs = $prefRepo->findBy(['user' => $me]);
 
@@ -625,7 +668,7 @@ final class SocialController
             }
         }
 
-        // 2) get passed movie ids for this watchlist/user
+// 2) watchlist-specific passed/picked for this user
         $watchlistSwipeRepo = $this->em->getRepository(WatchlistSwipe::class);
         $watchlistSwipes = $watchlistSwipeRepo->findBy([
             'watchlist' => $watchlist,
@@ -634,6 +677,7 @@ final class SocialController
 
         $passedMovieIds = [];
         $pickedMovieIds = [];
+
         foreach ($watchlistSwipes as $swipe) {
             if ($swipe->getStatus() === 'passed') {
                 $passedMovieIds[] = $swipe->getMovie()->getId();
@@ -642,57 +686,105 @@ final class SocialController
             }
         }
 
+// picked should not show again
         $excludedMovieIds = array_values(array_unique(array_merge($excludedMovieIds, $pickedMovieIds)));
 
-        // 3) unseen first = not excluded and not passed yet
-        $qb = $this->em->createQueryBuilder();
-        $qb->select('m')
-            ->from(Movie::class, 'm')
-            ->setMaxResults($limit);
+// 3) shared providers across accepted members
+        $commonProviderIds = $this->getWatchlistCommonProviderIds($watchlist);
+
+        if (empty($commonProviderIds)) {
+            return $this->json($res, [
+                'results' => [],
+                'meta' => [
+                    'no_shared_services' => true,
+                ],
+            ]);
+        }
+
+// 4) unseen first = not excluded and not passed yet, filtered by common providers
+        $conn = $this->em->getConnection();
+
+        $excludedSql = '';
+        $passedSql = '';
+
+        $params = [
+            'providerIds' => $commonProviderIds,
+            'limit' => $limit,
+        ];
+
+        $types = [
+            'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+            'limit' => \PDO::PARAM_INT,
+        ];
 
         if (!empty($excludedMovieIds)) {
-            $qb->andWhere($qb->expr()->notIn('m.id', ':excludedIds'))
-                ->setParameter('excludedIds', $excludedMovieIds);
+            $excludedSql = ' AND m.id NOT IN (:excludedIds)';
+            $params['excludedIds'] = $excludedMovieIds;
+            $types['excludedIds'] = \Doctrine\DBAL\ArrayParameterType::INTEGER;
         }
 
         if (!empty($passedMovieIds)) {
-            $qb->andWhere($qb->expr()->notIn('m.id', ':passedIds'))
-                ->setParameter('passedIds', $passedMovieIds);
+            $passedSql = ' AND m.id NOT IN (:passedIds)';
+            $params['passedIds'] = $passedMovieIds;
+            $types['passedIds'] = \Doctrine\DBAL\ArrayParameterType::INTEGER;
         }
 
-        $unseenMovies = $qb->getQuery()->getResult();
+        $sql = "
+        SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+        FROM movies m
+        INNER JOIN title_providers tp ON tp.movie_id = m.id
+        WHERE tp.provider_id IN (:providerIds)
+        {$excludedSql}
+        {$passedSql}
+        ORDER BY m.id DESC
+        LIMIT :limit
+    ";
 
-        $movies = $unseenMovies;
+        $movies = $conn->executeQuery($sql, $params, $types)->fetchAllAssociative();
 
-        // 4) if nothing unseen left, recycle passed movies (but still exclude liked/disliked/picked)
+// 5) if no unseen remain, recycle passed (but still never show liked/disliked/picked)
         if (count($movies) === 0 && !empty($passedMovieIds)) {
-            $qb2 = $this->em->createQueryBuilder();
-            $qb2->select('m')
-                ->from(Movie::class, 'm')
-                ->where($qb2->expr()->in('m.id', ':passedIds'))
-                ->setParameter('passedIds', $passedMovieIds)
-                ->setMaxResults($limit);
+            $params = [
+                'providerIds' => $commonProviderIds,
+                'passedIds' => $passedMovieIds,
+                'limit' => $limit,
+            ];
 
+            $types = [
+                'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                'passedIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                'limit' => \PDO::PARAM_INT,
+            ];
+
+            $excludedSql = '';
             if (!empty($excludedMovieIds)) {
-                $qb2->andWhere($qb2->expr()->notIn('m.id', ':excludedIds'))
-                    ->setParameter('excludedIds', $excludedMovieIds);
+                $excludedSql = ' AND m.id NOT IN (:excludedIds)';
+                $params['excludedIds'] = $excludedMovieIds;
+                $types['excludedIds'] = \Doctrine\DBAL\ArrayParameterType::INTEGER;
             }
 
-            $movies = $qb2->getQuery()->getResult();
+            $sql = "
+            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+            FROM movies m
+            INNER JOIN title_providers tp ON tp.movie_id = m.id
+            WHERE tp.provider_id IN (:providerIds)
+              AND m.id IN (:passedIds)
+              {$excludedSql}
+            ORDER BY m.id DESC
+            LIMIT :limit
+        ";
+
+            $movies = $conn->executeQuery($sql, $params, $types)->fetchAllAssociative();
         }
 
-        $results = [];
-        foreach ($movies as $movie) {
-            $results[] = [
-                'id' => $movie->getId(),
-                'tmdb_id' => method_exists($movie, 'getTmdbId') ? $movie->getTmdbId() : null,
-                'is_tv' => 0,
-                'title' => method_exists($movie, 'getTitle') ? $movie->getTitle() : null,
-                'poster_path' => method_exists($movie, 'getPosterPath') ? $movie->getPosterPath() : null,
-            ];
-        }
+        return $this->json($res, [
+            'results' => $movies,
+            'meta' => [
+                'no_shared_services' => false,
+                'provider_ids' => $commonProviderIds,
+            ],
+        ]);
 
-        return $this->json($res, ['results' => $results]);
     }
 
     public function likedMovies(Request $req, Response $res): Response
@@ -994,6 +1086,43 @@ final class SocialController
             'ok' => true,
             'status' => 'pending',
         ], 201);
+    }
+
+    public function updateStreamingServices(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $providerIds = array_values(array_unique(array_map('intval', (array) ($data['provider_ids'] ?? []))));
+        $providerIds = array_values(array_filter($providerIds, fn(int $id) => $id > 0));
+
+        $repo = $this->em->getRepository(UserStreamingService::class);
+        $existing = $repo->findBy(['user' => $me]);
+
+        foreach ($existing as $row) {
+            $this->em->remove($row);
+        }
+        $this->em->flush();
+
+        foreach ($providerIds as $providerId) {
+            $this->em->persist(new UserStreamingService($me, $providerId));
+        }
+
+        $this->em->flush();
+
+        return $this->json($res, [
+            'ok' => true,
+            'provider_ids' => $providerIds,
+        ]);
     }
 
     public function watchlistInvites(Request $req, Response $res): Response
