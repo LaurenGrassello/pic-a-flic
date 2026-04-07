@@ -1114,7 +1114,13 @@ final class SocialController
         $this->em->flush();
 
         foreach ($providerIds as $providerId) {
-            $this->em->persist(new UserStreamingService($me, $providerId));
+            $service = $this->em->find(\PicaFlic\Domain\Entity\StreamingService::class, $providerId);
+
+            if (!$service) {
+                return $this->json($res, ['error' => "Streaming service {$providerId} not found"], 404);
+            }
+
+            $this->em->persist(new UserStreamingService($me, $service));
         }
 
         $this->em->flush();
