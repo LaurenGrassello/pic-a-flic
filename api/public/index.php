@@ -157,6 +157,8 @@ $app->get('/social/watchlist-invites', [$social, 'watchlistInvites'])->add($auth
 $app->post('/social/watchlist-invites/{inviteId}/accept', [$social, 'acceptWatchlistInvite'])->add($authMw);
 $app->post('/social/watchlist-invites/{inviteId}/decline', [$social, 'declineWatchlistInvite'])->add($authMw);
 $app->post('/profile/streaming-services', [$social, 'updateStreamingServices'])->add($authMw);
+$app->get('/streaming-services', [$social, 'streamingServices'])->add($authMw);
+$app->get('/profile/streaming-services', [$social, 'myStreamingServices'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)

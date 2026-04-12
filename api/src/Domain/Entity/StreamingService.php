@@ -6,16 +6,37 @@ use Doctrine\ORM\Mapping as ORM;
 
 /** Streaming services catalog (e.g., netflix, prime). */
 #[ORM\Entity, ORM\Table(name: "streaming_services")]
+
 class StreamingService
 {
     #[ORM\Id, ORM\GeneratedValue, ORM\Column(type: "integer")] private int $id;
+    #[ORM\Column(name: 'provider_id', type: 'integer', nullable: true)] private int $provider_id;
     #[ORM\Column(type: "string", length: 50, unique: true)] private string $code;
     #[ORM\Column(type: "string", length: 100)] private string $name;
+
     public function __construct(string $code, string $name)
-    {$this->code = $code;
-        $this->name = $name;}
+    {
+        $this->code = $code;
+        $this->name = $name;
+    }
+
     public function getId(): int
-    {return $this->id;}public function getCode(): string
-    {return $this->code;}public function getName(): string
-    {return $this->name;}
+    {
+        return $this->id;
+    }
+
+    public function getCode(): string
+    {
+        return $this->code;
+    }
+
+    public function getName(): string
+    {
+        return $this->name;
+    }
+
+    public function getProviderId(): ?int
+    {
+        return $this->provider_id;
+    }
 }

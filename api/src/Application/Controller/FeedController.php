@@ -30,43 +30,76 @@ final class FeedController
             return $this->json($res, ['error' => 'Unauthorized'], 401);
         }
 
-        /** @var User|null $me */
-        $me = $this->em->find(User::class, $meId);
+        /** @var \PicaFlic\Domain\Entity\User|null $me */
+        $me = $this->em->find(\PicaFlic\Domain\Entity\User::class, $meId);
         if (!$me) {
             return $this->json($res, ['error' => 'User not found'], 404);
         }
 
-        $providerIds = $this->getUserProviderIds($me);
-
+        $providerIds = $this->getUserSelectedProviderIds($me);
         $conn = $this->em->getConnection();
 
         if (!empty($providerIds)) {
-            $sql = "
-            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
-            FROM movies m
-            INNER JOIN title_providers tp ON tp.movie_id = m.id
-            WHERE tp.provider_id IN (:providerIds)
-            ORDER BY m.id DESC
-            LIMIT 60
-        ";
-
             $rows = $conn->executeQuery(
-                $sql,
+                "
+    SELECT DISTINCT
+        m.id,
+        m.tmdb_id,
+        0 AS is_tv,
+        m.title,
+        NULL AS release_date,
+        m.poster_path
+    FROM movies m
+    INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
+    WHERE tp.provider_id IN (:providerIds)
+      AND tp.region = 'US'
+      AND tp.is_tv = 0
+    ORDER BY m.id DESC
+    LIMIT 60
+    ",
                 ['providerIds' => $providerIds],
                 ['providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER]
             )->fetchAllAssociative();
+
         } else {
-            // skipped setup → fallback to current all-services behavior
-            $rows = $conn->fetchAllAssociative("
-            SELECT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+            // fallback if user skipped streaming setup
+            $rows = $conn->fetchAllAssociative(
+                "
+            SELECT
+                m.id,
+                m.tmdb_id,
+                0 AS is_tv,
+                m.title,
+                m.release_date,
+                m.poster_path
             FROM movies m
             ORDER BY m.id DESC
             LIMIT 60
-        ");
+            "
+            );
         }
 
         $res->getBody()->write(json_encode($rows));
         return $res->withHeader('Content-Type', 'application/json');
+    }
+
+    private function getUserSelectedProviderIds(\PicaFlic\Domain\Entity\User $user): array
+    {
+        $repo = $this->em->getRepository(\PicaFlic\Domain\Entity\UserStreamingService::class);
+        $rows = $repo->findBy(['user' => $user]);
+
+        $providerIds = [];
+
+        foreach ($rows as $row) {
+            $service = $row->getService();
+            $providerId = $service->getProviderId();
+
+            if ($providerId) {
+                $providerIds[] = $providerId;
+            }
+        }
+
+        return array_values(array_unique($providerIds));
     }
 
     /** GET /feed/deck ... (newer first) */

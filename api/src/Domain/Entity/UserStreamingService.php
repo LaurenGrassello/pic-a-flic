@@ -19,4 +19,9 @@ class UserStreamingService
         $this->user = $user;
         $this->service = $service;
     }
+
+    public function getService(): StreamingService
+    {
+        return $this->service;
+    }
 }
