@@ -70,7 +70,7 @@ final class FeedController
                 m.tmdb_id,
                 0 AS is_tv,
                 m.title,
-                m.release_date,
+                NULL AS release_date,
                 m.poster_path
             FROM movies m
             ORDER BY m.id DESC

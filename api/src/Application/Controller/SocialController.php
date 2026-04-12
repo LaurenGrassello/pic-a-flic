@@ -730,7 +730,7 @@ final class SocialController
         }
 
         $sql = "
-        SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+        SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
         FROM movies m
         INNER JOIN title_providers tp ON tp.movie_id = m.id
         WHERE tp.provider_id IN (:providerIds)
@@ -764,7 +764,7 @@ final class SocialController
             }
 
             $sql = "
-            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, m.release_date, m.poster_path
+            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
             FROM movies m
             INNER JOIN title_providers tp ON tp.movie_id = m.id
             WHERE tp.provider_id IN (:providerIds)
