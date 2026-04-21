@@ -383,7 +383,7 @@ final class SocialController
 
             // if a member has no selected providers, treat as no overlap for now
             if (empty($providerIds)) {
-                return [];
+                continue;
             }
 
             $allProviderSets[] = $providerIds;
@@ -732,7 +732,7 @@ final class SocialController
         $sql = "
         SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
         FROM movies m
-        INNER JOIN title_providers tp ON tp.movie_id = m.id
+        INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
         WHERE tp.provider_id IN (:providerIds)
         {$excludedSql}
         {$passedSql}
@@ -766,7 +766,7 @@ final class SocialController
             $sql = "
             SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
             FROM movies m
-            INNER JOIN title_providers tp ON tp.movie_id = m.id
+            INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
             WHERE tp.provider_id IN (:providerIds)
               AND m.id IN (:passedIds)
               {$excludedSql}
@@ -785,6 +785,84 @@ final class SocialController
             ],
         ]);
 
+    }
+
+    public function popularMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/popular', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function topRatedMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/top_rated', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function upcomingMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/upcoming', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function nowPlayingMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/now_playing', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function trendingMovies(string $window = 'week', int $page = 1): array
+    {
+        return $this->get("https://api.themoviedb.org/3/trending/movie/{$window}", [
+            'page' => $page,
+        ]);
+    }
+
+    public function streamingServices(Request $req, Response $res): Response
+    {
+        $conn = $this->em->getConnection();
+
+        $rows = $conn->fetchAllAssociative("
+        SELECT id, name
+        FROM streaming_services
+        ORDER BY name ASC
+    ");
+
+        return $this->json($res, ['results' => $rows]);
+    }
+
+    public function myStreamingServices(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $repo = $this->em->getRepository(UserStreamingService::class);
+        $rows = $repo->findBy(['user' => $me]);
+
+        $providerIds = array_map(
+            fn(UserStreamingService $row) => $row->getService()->getId(),
+            $rows
+        );
+
+        return $this->json($res, [
+            'provider_ids' => array_values($providerIds),
+        ]);
     }
 
     public function likedMovies(Request $req, Response $res): Response

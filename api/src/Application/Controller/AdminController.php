@@ -1,5 +1,5 @@
 <?php
-declare(strict_types=1);
+declare (strict_types = 1);
 
 namespace PicaFlic\Application\Controller;
 
@@ -21,11 +21,45 @@ final class AdminController
 
     public function ingestTmdb(Request $req, Response $res): Response
     {
-        $q      = $req->getQueryParams();
-        $page   = max(1, (int)($q['page'] ?? 1));
-        $window = in_array($q['window'] ?? 'week', ['day','week'], true) ? ($q['window'] ?? 'week') : 'week';
+        $q = $req->getQueryParams();
 
-        $payload = $this->tmdb->trendingMovies($window, $page);
+        $page = max(1, (int) ($q['page'] ?? 1));
+        $source = (string) ($q['source'] ?? 'trending');
+        $providerId = null;
+        $window = in_array(($q['window'] ?? 'week'), ['day', 'week'], true)
+        ? (string) ($q['window'] ?? 'week')
+        : 'week';
+
+        switch ($source) {
+            case 'provider':
+                $providerId = max(1, (int) ($q['provider_id'] ?? 0));
+                if ($providerId <= 0) {
+                    $res->getBody()->write(json_encode([
+                        'error' => 'provider_id is required when source=provider',
+                    ]));
+                    return $res->withHeader('Content-Type', 'application/json')->withStatus(422);
+                }
+
+                $payload = $this->tmdb->discoverMoviesByProvider($providerId, $page);
+                break;
+            case 'popular':
+                $payload = $this->tmdb->popularMovies($page);
+                break;
+            case 'top_rated':
+                $payload = $this->tmdb->topRatedMovies($page);
+                break;
+            case 'upcoming':
+                $payload = $this->tmdb->upcomingMovies($page);
+                break;
+            case 'now_playing':
+                $payload = $this->tmdb->nowPlayingMovies($page);
+                break;
+            case 'trending':
+            default:
+                $payload = $this->tmdb->trendingMovies($window, $page);
+                break;
+        }
+
         $results = $payload['results'] ?? [];
 
         $conn = $this->em->getConnection();
@@ -41,15 +75,18 @@ ON DUPLICATE KEY UPDATE
 SQL);
 
         $count = 0;
-        foreach ($results as $r) {
-            $tmdbId = (int)($r['id'] ?? 0);
-            if (!$tmdbId) continue;
 
-            $title    = (string)($r['title'] ?? $r['name'] ?? '');
-            $poster   = $r['poster_path'] ?? null;
-            $overview = $r['overview']    ?? null;
-            $year     = !empty($r['release_date']) ? (int)substr($r['release_date'], 0, 4) : null;
-            $runtime  = null; 
+        foreach ($results as $r) {
+            $tmdbId = (int) ($r['id'] ?? 0);
+            if (!$tmdbId) {
+                continue;
+            }
+
+            $title = (string) ($r['title'] ?? $r['name'] ?? '');
+            $poster = $r['poster_path'] ?? null;
+            $overview = $r['overview'] ?? null;
+            $year = !empty($r['release_date']) ? (int) substr((string) $r['release_date'], 0, 4) : null;
+            $runtime = null;
 
             $stmt->bindValue('tmdb_id', $tmdbId);
             $stmt->bindValue('title', $title);
@@ -62,7 +99,15 @@ SQL);
             $count++;
         }
 
-        $res->getBody()->write(json_encode(['ok'=>true,'ingested'=>$count,'page'=>$page,'window'=>$window]));
-        return $res->withHeader('Content-Type','application/json');
+        $res->getBody()->write(json_encode([
+            'ok' => true,
+            'source' => $source,
+            'window' => $source === 'trending' ? $window : null,
+            'provider_id' => $source === 'provider' ? 'providerId' : null,
+            'page' => $page,
+            'ingested' => $count,
+        ]));
+
+        return $res->withHeader('Content-Type', 'application/json');
     }
 }

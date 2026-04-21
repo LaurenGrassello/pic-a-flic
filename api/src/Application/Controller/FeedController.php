@@ -22,7 +22,7 @@ final class FeedController
         return $res->withHeader('Content-Type', 'application/json')->withStatus($status);
     }
 
-    /** GET /feed/for-you?limit=60&page=1&providers=netflix|disney */
+    /** GET /feed/for-you **/
     public function forYou(Request $req, Response $res): Response
     {
         $meId = (int) $req->getAttribute('uid');
@@ -55,32 +55,62 @@ final class FeedController
       AND tp.region = 'US'
       AND tp.is_tv = 0
     ORDER BY m.id DESC
-    LIMIT 60
+    LIMIT :limit OFFSET :offset
     ",
-                ['providerIds' => $providerIds],
-                ['providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER]
+                [
+                    'providerIds' => $providerIds,
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ],
+                [
+                    'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                    'limit' => \PDO::PARAM_INT,
+                    'offset' => \PDO::PARAM_INT,
+                ]
             )->fetchAllAssociative();
 
         } else {
             // fallback if user skipped streaming setup
-            $rows = $conn->fetchAllAssociative(
+            $rows = $conn->executeQuery(
                 "
-            SELECT
-                m.id,
-                m.tmdb_id,
-                0 AS is_tv,
-                m.title,
-                NULL AS release_date,
-                m.poster_path
-            FROM movies m
-            ORDER BY m.id DESC
-            LIMIT 60
-            "
-            );
+    SELECT
+        m.id,
+        m.tmdb_id,
+        0 AS is_tv,
+        m.title,
+        NULL AS release_date,
+        m.poster_path
+    FROM movies m
+    ORDER BY m.id DESC
+    LIMIT :limit OFFSET :offset
+    ",
+                [
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ],
+                [
+                    'limit' => \PDO::PARAM_INT,
+                    'offset' => \PDO::PARAM_INT,
+                ]
+            )->fetchAllAssociative();
         }
 
-        $res->getBody()->write(json_encode($rows));
+        $q = $req->getQueryParams();
+
+        $limit = min(100, max(1, (int) ($q['limit'] ?? 20)));
+        $offset = max(0, (int) ($q['offset'] ?? 0));
+
+        $res->getBody()->write(json_encode([
+            'results' => $rows,
+            'meta' => [
+                'limit' => $limit,
+                'offset' => $offset,
+                'count' => count($rows),
+                'has_more' => count($rows) === $limit,
+            ],
+        ]));
         return $res->withHeader('Content-Type', 'application/json');
+
     }
 
     private function getUserSelectedProviderIds(\PicaFlic\Domain\Entity\User $user): array

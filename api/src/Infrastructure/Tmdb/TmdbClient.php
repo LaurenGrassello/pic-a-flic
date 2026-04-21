@@ -95,4 +95,53 @@ final class TmdbClient
     {
         return $this->get("https://api.themoviedb.org/3/{$type}/{$tmdbId}");
     }
+
+    public function trendingMovies(string $window = 'week', int $page = 1): array
+    {
+        return $this->get("https://api.themoviedb.org/3/trending/movie/{$window}", [
+            'page' => $page,
+        ]);
+    }
+
+    public function popularMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/popular', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function topRatedMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/top_rated', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function discoverMoviesByProvider(int $providerId, int $page = 1, string $region = 'US'): array
+    {
+        return $this->get('https://api.themoviedb.org/3/discover/movie', [
+            'page' => $page,
+            'watch_region' => $region,
+            'with_watch_providers' => $providerId,
+            'sort_by' => 'popularity.desc',
+        ]);
+    }
+
+    public function upcomingMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/upcoming', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
+
+    public function nowPlayingMovies(int $page = 1): array
+    {
+        return $this->get('https://api.themoviedb.org/3/movie/now_playing', [
+            'page' => $page,
+            'region' => 'US',
+        ]);
+    }
 }
