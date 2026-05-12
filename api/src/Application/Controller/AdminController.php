@@ -74,6 +74,14 @@ ON DUPLICATE KEY UPDATE
   overview=VALUES(overview)
 SQL);
 
+        $providerStmt = ($source === 'provider' && $providerId)
+        ? $conn->prepare(<<<SQL
+                    INSERT INTO title_providers (tmdb_id, provider_id, region, is_tv)
+                    VALUES (:tmdb_id, :provider_id, 'US', 0)
+                    ON DUPLICATE KEY UPDATE provider_id=VALUES(provider_id)
+                SQL)
+        :null;
+
         $count = 0;
 
         foreach ($results as $r) {
@@ -96,6 +104,13 @@ SQL);
             $stmt->bindValue('overview', $overview);
 
             $stmt->executeStatement();
+
+            if ($providerStmt) {
+                $providerStmt->bindValue('tmdb_id', $tmdbId);
+                $providerStmt->bindValue('provider_id', $providerId);
+                $providerStmt->executeStatement();
+            }
+
             $count++;
         }
 
@@ -103,7 +118,7 @@ SQL);
             'ok' => true,
             'source' => $source,
             'window' => $source === 'trending' ? $window : null,
-            'provider_id' => $source === 'provider' ? 'providerId' : null,
+            'provider_id' => $source === 'provider' ? $providerId : null,
             'page' => $page,
             'ingested' => $count,
         ]));

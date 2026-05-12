@@ -27,6 +27,53 @@ final class SocialController
     public function __construct(private EntityManager $em)
     {}
 
+    public function updateUsername(Request $req, Response $res): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        /** @var User|null $me */
+        $me = $this->em->find(User::class, $meId);
+        if (!$me) {
+            return $this->json($res, ['error' => 'User not found'], 404);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $displayName = trim((string) ($data['display_name'] ?? ''));
+
+        if ($displayName === '') {
+            return $this->json($res, ['error' => 'Display name is required'], 422);
+        }
+
+        if (mb_strlen($displayName) > 50) {
+            return $this->json($res, ['error' => 'Display name is too long'], 422);
+        }
+
+        $conn = $this->em->getConnection();
+        $existing = $conn->fetchOne(
+            'SELECT id FROM users WHERE display_name = :display_name AND id != :id LIMIT 1',
+            [
+                'display_name' => $displayName,
+                'id' => $meId,
+            ]
+        );
+
+        if ($existing) {
+            return $this->json($res, ['error' => 'Username is already taken'], 409);
+        }
+
+        $me->setDisplayName($displayName);
+        $this->em->flush();
+
+        return $this->json($res, [
+            'id' => $me->getId(),
+            'email' => $me->getEmail(),
+            'display_name' => $me->getDisplayName(),
+        ]);
+    }
+
     /** POST /social/follow/{userId} */
     public function follow(Request $req, Response $res, array $args): Response
     {
@@ -42,7 +89,6 @@ final class SocialController
             return $this->json($res, ['error' => 'User not found'], 404);
         }
 
-        // prevent duplicates
         $exists = $this->em->getRepository(Follow::class)->findOneBy(['follower' => $me, 'followee' => $target]);
         if (!$exists) {
             $this->em->persist(new Follow($me, $target));
@@ -63,8 +109,10 @@ final class SocialController
         }
 
         $row = $this->em->getRepository(Follow::class)->findOneBy(['follower' => $me, 'followee' => $target]);
-        if ($row) {$this->em->remove($row);
-            $this->em->flush();}
+        if ($row) {
+            $this->em->remove($row);
+            $this->em->flush();
+        }
         return $this->json($res, ['ok' => true]);
     }
 
@@ -338,10 +386,8 @@ final class SocialController
         $this->em->persist($watchlist);
         $this->em->flush();
 
-        // creator becomes the only immediate member
         $this->em->persist(new WatchlistMember($watchlist, $me));
 
-        // selected friends become invites
         foreach ($invitedUsers as $invitedUser) {
             $this->em->persist(new WatchlistInvite($watchlist, $invitedUser, $me, 'pending'));
         }
@@ -381,7 +427,6 @@ final class SocialController
         foreach ($memberships as $membership) {
             $providerIds = $this->getUserProviderIds($membership->getUser());
 
-            // if a member has no selected providers, treat as no overlap for now
             if (empty($providerIds)) {
                 continue;
             }
@@ -657,7 +702,6 @@ final class SocialController
 
         $limit = max(1, min(100, (int) ($req->getQueryParams()['limit'] ?? 40)));
 
-// 1) personal liked/disliked always excluded
         $prefRepo = $this->em->getRepository(UserMoviePreference::class);
         $prefs = $prefRepo->findBy(['user' => $me]);
 
@@ -668,7 +712,6 @@ final class SocialController
             }
         }
 
-// 2) watchlist-specific passed/picked for this user
         $watchlistSwipeRepo = $this->em->getRepository(WatchlistSwipe::class);
         $watchlistSwipes = $watchlistSwipeRepo->findBy([
             'watchlist' => $watchlist,
@@ -686,10 +729,8 @@ final class SocialController
             }
         }
 
-// picked should not show again
         $excludedMovieIds = array_values(array_unique(array_merge($excludedMovieIds, $pickedMovieIds)));
 
-// 3) shared providers across accepted members
         $commonProviderIds = $this->getWatchlistCommonProviderIds($watchlist);
 
         if (empty($commonProviderIds)) {
@@ -701,7 +742,6 @@ final class SocialController
             ]);
         }
 
-// 4) unseen first = not excluded and not passed yet, filtered by common providers
         $conn = $this->em->getConnection();
 
         $excludedSql = '';
@@ -730,19 +770,18 @@ final class SocialController
         }
 
         $sql = "
-        SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
-        FROM movies m
-        INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
-        WHERE tp.provider_id IN (:providerIds)
-        {$excludedSql}
-        {$passedSql}
-        ORDER BY m.id DESC
-        LIMIT :limit
-    ";
+            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
+            FROM movies m
+            INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
+            WHERE tp.provider_id IN (:providerIds)
+            {$excludedSql}
+            {$passedSql}
+            ORDER BY m.id DESC
+            LIMIT :limit
+        ";
 
         $movies = $conn->executeQuery($sql, $params, $types)->fetchAllAssociative();
 
-// 5) if no unseen remain, recycle passed (but still never show liked/disliked/picked)
         if (count($movies) === 0 && !empty($passedMovieIds)) {
             $params = [
                 'providerIds' => $commonProviderIds,
@@ -764,15 +803,15 @@ final class SocialController
             }
 
             $sql = "
-            SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
-            FROM movies m
-            INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
-            WHERE tp.provider_id IN (:providerIds)
-              AND m.id IN (:passedIds)
-              {$excludedSql}
-            ORDER BY m.id DESC
-            LIMIT :limit
-        ";
+                SELECT DISTINCT m.id, m.tmdb_id, 0 AS is_tv, m.title, NULL AS release_date, m.poster_path
+                FROM movies m
+                INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
+                WHERE tp.provider_id IN (:providerIds)
+                  AND m.id IN (:passedIds)
+                  {$excludedSql}
+                ORDER BY m.id DESC
+                LIMIT :limit
+            ";
 
             $movies = $conn->executeQuery($sql, $params, $types)->fetchAllAssociative();
         }
@@ -784,46 +823,6 @@ final class SocialController
                 'provider_ids' => $commonProviderIds,
             ],
         ]);
-
-    }
-
-    public function popularMovies(int $page = 1): array
-    {
-        return $this->get('https://api.themoviedb.org/3/movie/popular', [
-            'page' => $page,
-            'region' => 'US',
-        ]);
-    }
-
-    public function topRatedMovies(int $page = 1): array
-    {
-        return $this->get('https://api.themoviedb.org/3/movie/top_rated', [
-            'page' => $page,
-            'region' => 'US',
-        ]);
-    }
-
-    public function upcomingMovies(int $page = 1): array
-    {
-        return $this->get('https://api.themoviedb.org/3/movie/upcoming', [
-            'page' => $page,
-            'region' => 'US',
-        ]);
-    }
-
-    public function nowPlayingMovies(int $page = 1): array
-    {
-        return $this->get('https://api.themoviedb.org/3/movie/now_playing', [
-            'page' => $page,
-            'region' => 'US',
-        ]);
-    }
-
-    public function trendingMovies(string $window = 'week', int $page = 1): array
-    {
-        return $this->get("https://api.themoviedb.org/3/trending/movie/{$window}", [
-            'page' => $page,
-        ]);
     }
 
     public function streamingServices(Request $req, Response $res): Response
@@ -831,10 +830,10 @@ final class SocialController
         $conn = $this->em->getConnection();
 
         $rows = $conn->fetchAllAssociative("
-        SELECT id, name
-        FROM streaming_services
-        ORDER BY name ASC
-    ");
+            SELECT id, name
+            FROM streaming_services
+            ORDER BY name ASC
+        ");
 
         return $this->json($res, ['results' => $rows]);
     }
@@ -856,7 +855,7 @@ final class SocialController
         $rows = $repo->findBy(['user' => $me]);
 
         $providerIds = array_map(
-            fn(UserStreamingService $row) => $row->getService()->getId(),
+            fn(UserStreamingService $row) => $row->getService()->getProviderId(),
             $rows
         );
 
@@ -879,10 +878,7 @@ final class SocialController
         }
 
         $repo = $this->em->getRepository(UserMoviePreference::class);
-        $prefs = $repo->findBy([
-            'user' => $me,
-            'status' => 'liked',
-        ]);
+        $prefs = $repo->findBy(['user' => $me, 'status' => 'liked']);
 
         $results = [];
         foreach ($prefs as $pref) {
@@ -912,10 +908,7 @@ final class SocialController
         }
 
         $repo = $this->em->getRepository(UserMoviePreference::class);
-        $prefs = $repo->findBy([
-            'user' => $me,
-            'status' => 'disliked',
-        ]);
+        $prefs = $repo->findBy(['user' => $me, 'status' => 'disliked']);
 
         $results = [];
         foreach ($prefs as $pref) {
@@ -1006,10 +999,7 @@ final class SocialController
         }
 
         $repo = $this->em->getRepository(UserMoviePreference::class);
-        $existing = $repo->findOneBy([
-            'user' => $me,
-            'movie' => $movie,
-        ]);
+        $existing = $repo->findOneBy(['user' => $me, 'movie' => $movie]);
 
         if ($existing) {
             $existing->setStatus($status);
@@ -1040,11 +1030,9 @@ final class SocialController
             return $this->json($res, ['error' => 'Not found'], 404);
         }
 
-        // upsert: one swipe per user+movie
         $repo = $this->em->getRepository(Swipe::class);
         $existing = $repo->findOneBy(['user' => $me, 'movie' => $movie]);
         if ($existing) {
-            // reflect new choice
             $refLiked = new \ReflectionProperty(Swipe::class, 'liked');
             $refLiked->setAccessible(true);
             $refLiked->setValue($existing, $liked);
@@ -1056,10 +1044,6 @@ final class SocialController
         return $this->json($res, ['ok' => true]);
     }
 
-    /**
-     * GET /social/matches/{friendId}?limit=20&offset=0
-     * Returns movies both users liked.
-     */
     public function matches(Request $req, Response $res, array $args): Response
     {
         $meId = (int) $req->getAttribute('uid');
@@ -1111,7 +1095,6 @@ final class SocialController
         foreach ($memberships as $membership) {
             $user = $membership->getUser();
             $existingMemberIds[] = $user->getId();
-
             if ($user->getId() === $meId) {
                 $isMember = true;
             }
@@ -1160,10 +1143,7 @@ final class SocialController
 
         $this->em->flush();
 
-        return $this->json($res, [
-            'ok' => true,
-            'status' => 'pending',
-        ], 201);
+        return $this->json($res, ['ok' => true, 'status' => 'pending'], 201);
     }
 
     public function updateStreamingServices(Request $req, Response $res): Response
@@ -1191,13 +1171,19 @@ final class SocialController
         }
         $this->em->flush();
 
-        foreach ($providerIds as $providerId) {
-            $service = $this->em->find(\PicaFlic\Domain\Entity\StreamingService::class, $providerId);
+        $conn = $this->em->getConnection();
 
-            if (!$service) {
+        foreach ($providerIds as $providerId) {
+            $serviceId = $conn->fetchOne(
+                'SELECT id FROM streaming_services WHERE provider_id = ?',
+                [$providerId]
+            );
+
+            if (!$serviceId) {
                 return $this->json($res, ['error' => "Streaming service {$providerId} not found"], 404);
             }
 
+            $service = $this->em->find(\PicaFlic\Domain\Entity\StreamingService::class, (int) $serviceId);
             $this->em->persist(new UserStreamingService($me, $service));
         }
 
@@ -1223,10 +1209,7 @@ final class SocialController
         }
 
         $repo = $this->em->getRepository(WatchlistInvite::class);
-        $invites = $repo->findBy([
-            'invitedUser' => $me,
-            'status' => 'pending',
-        ]);
+        $invites = $repo->findBy(['invitedUser' => $me, 'status' => 'pending']);
 
         $results = [];
         foreach ($invites as $invite) {
@@ -1275,10 +1258,7 @@ final class SocialController
         $watchlist = $invite->getWatchlist();
 
         $memberRepo = $this->em->getRepository(WatchlistMember::class);
-        $existingMember = $memberRepo->findOneBy([
-            'watchlist' => $watchlist,
-            'user' => $me,
-        ]);
+        $existingMember = $memberRepo->findOneBy(['watchlist' => $watchlist, 'user' => $me]);
 
         if (!$existingMember) {
             $this->em->persist(new WatchlistMember($watchlist, $me));
@@ -1287,10 +1267,7 @@ final class SocialController
         $invite->setStatus('accepted');
         $this->em->flush();
 
-        return $this->json($res, [
-            'ok' => true,
-            'status' => 'accepted',
-        ]);
+        return $this->json($res, ['ok' => true, 'status' => 'accepted']);
     }
 
     public function declineWatchlistInvite(Request $req, Response $res, array $args): Response
@@ -1322,10 +1299,7 @@ final class SocialController
         $invite->setStatus('declined');
         $this->em->flush();
 
-        return $this->json($res, [
-            'ok' => true,
-            'status' => 'declined',
-        ]);
+        return $this->json($res, ['ok' => true, 'status' => 'declined']);
     }
 
     private function json(Response $res, array $payload, int $status = 200): Response

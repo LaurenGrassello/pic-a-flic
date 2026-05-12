@@ -1,5 +1,5 @@
 <?php
-declare(strict_types=1);
+declare (strict_types = 1);
 
 namespace PicaFlic\Domain\Entity;
 
@@ -34,15 +34,17 @@ class User
         $this->displayName = $displayName;
     }
 
-    public function getId(): int { 
-      return $this->id; 
+    public function getId(): int
+    {
+        return $this->id;
     }
 
-    public function getEmail(): string { 
-      return $this->email; 
+    public function getEmail(): string
+    {
+        return $this->email;
     }
 
-       public function getPasswordHash(): string
+    public function getPasswordHash(): string
     {
         return $this->passwordHash;
     }
@@ -52,12 +54,14 @@ class User
         $this->passwordHash = $hash;
     }
 
-    public function getDisplayName(): string { 
-      return $this->displayName; 
+    public function getDisplayName(): string
+    {
+        return $this->displayName;
     }
 
-    public function setDisplayName(string $name): void { 
-      $this->displayName = $name; 
+    public function setDisplayName(string $name): void
+    {
+        $this->displayName = $name;
     }
 
 }

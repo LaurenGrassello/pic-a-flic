@@ -36,27 +36,31 @@ final class FeedController
             return $this->json($res, ['error' => 'User not found'], 404);
         }
 
+        $q = $req->getQueryParams();
+        $limit = min(100, max(1, (int) ($q['limit'] ?? 20)));
+        $offset = max(0, (int) ($q['offset'] ?? 0));
+
         $providerIds = $this->getUserSelectedProviderIds($me);
         $conn = $this->em->getConnection();
 
         if (!empty($providerIds)) {
             $rows = $conn->executeQuery(
                 "
-    SELECT DISTINCT
-        m.id,
-        m.tmdb_id,
-        0 AS is_tv,
-        m.title,
-        NULL AS release_date,
-        m.poster_path
-    FROM movies m
-    INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
-    WHERE tp.provider_id IN (:providerIds)
-      AND tp.region = 'US'
-      AND tp.is_tv = 0
-    ORDER BY m.id DESC
-    LIMIT :limit OFFSET :offset
-    ",
+            SELECT DISTINCT
+                m.id,
+                m.tmdb_id,
+                0 AS is_tv,
+                m.title,
+                NULL AS release_date,
+                m.poster_path
+            FROM movies m
+            INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
+            WHERE tp.provider_id IN (:providerIds)
+              AND tp.region = 'US'
+              AND tp.is_tv = 0
+            ORDER BY m.id DESC
+            LIMIT :limit OFFSET :offset
+            ",
                 [
                     'providerIds' => $providerIds,
                     'limit' => $limit,
@@ -68,22 +72,21 @@ final class FeedController
                     'offset' => \PDO::PARAM_INT,
                 ]
             )->fetchAllAssociative();
-
         } else {
             // fallback if user skipped streaming setup
             $rows = $conn->executeQuery(
                 "
-    SELECT
-        m.id,
-        m.tmdb_id,
-        0 AS is_tv,
-        m.title,
-        NULL AS release_date,
-        m.poster_path
-    FROM movies m
-    ORDER BY m.id DESC
-    LIMIT :limit OFFSET :offset
-    ",
+            SELECT
+                m.id,
+                m.tmdb_id,
+                0 AS is_tv,
+                m.title,
+                NULL AS release_date,
+                m.poster_path
+            FROM movies m
+            ORDER BY m.id DESC
+            LIMIT :limit OFFSET :offset
+            ",
                 [
                     'limit' => $limit,
                     'offset' => $offset,
@@ -95,11 +98,6 @@ final class FeedController
             )->fetchAllAssociative();
         }
 
-        $q = $req->getQueryParams();
-
-        $limit = min(100, max(1, (int) ($q['limit'] ?? 20)));
-        $offset = max(0, (int) ($q['offset'] ?? 0));
-
         $res->getBody()->write(json_encode([
             'results' => $rows,
             'meta' => [
@@ -109,8 +107,8 @@ final class FeedController
                 'has_more' => count($rows) === $limit,
             ],
         ]));
-        return $res->withHeader('Content-Type', 'application/json');
 
+        return $res->withHeader('Content-Type', 'application/json');
     }
 
     private function getUserSelectedProviderIds(\PicaFlic\Domain\Entity\User $user): array
