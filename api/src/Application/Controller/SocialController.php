@@ -464,21 +464,28 @@ final class SocialController
             ->getQuery()
             ->getResult();
 
+        $conn = $this->em->getConnection();
         $results = [];
+
         foreach ($watchlists as $watchlist) {
-            $countQb = $this->em->createQueryBuilder();
-            $memberCount = (int) $countQb->select('COUNT(wm2.id)')
-                ->from(WatchlistMember::class, 'wm2')
-                ->where('wm2.watchlist = :watchlist')
-                ->setParameter('watchlist', $watchlist)
-                ->getQuery()
-                ->getSingleScalarResult();
+            $members = $conn->fetchAllAssociative(
+                "SELECT u.display_name
+             FROM watchlist_members wm
+             JOIN users u ON u.id = wm.user_id
+             WHERE wm.watchlist_id = ?
+             AND u.id != ?",
+                [$watchlist->getId(), $meId]
+            );
+
+            $memberNames = array_map(fn($m) => $m['display_name'], $members);
+            $memberCount = count($memberNames) + 1; // +1 for current user
 
             $results[] = [
                 'id' => $watchlist->getId(),
                 'name' => $watchlist->getName(),
                 'created_by' => $watchlist->getCreatedBy()->getId(),
                 'member_count' => $memberCount,
+                'member_names' => $memberNames,
             ];
         }
 

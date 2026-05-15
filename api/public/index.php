@@ -161,6 +161,15 @@ $app->get('/streaming-services', [$social, 'streamingServices'])->add($authMw);
 $app->get('/profile/streaming-services', [$social, 'myStreamingServices'])->add($authMw);
 $app->post('/profile/username', [$social, 'updateUsername'])->add($authMw);
 
+// Personal Watchlists
+$personalWl = $container->get(\PicaFlic\Application\Controller\PersonalWatchlistController::class);
+$app->get('/personal-watchlists', [$personalWl, 'index'])->add($authMw);
+$app->post('/personal-watchlists', [$personalWl, 'create'])->add($authMw);
+$app->get('/personal-watchlists/{id}/movies', [$personalWl, 'movies'])->add($authMw);
+$app->post('/personal-watchlists/{id}/movies', [$personalWl, 'addMovie'])->add($authMw);
+$app->delete('/personal-watchlists/{id}/movies/{movieId}', [$personalWl, 'removeMovie'])->add($authMw);
+$app->delete('/personal-watchlists/{id}', [$personalWl, 'delete'])->add($authMw);
+
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
 // ---------------------------------------------------------

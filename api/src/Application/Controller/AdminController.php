@@ -64,15 +64,16 @@ final class AdminController
 
         $conn = $this->em->getConnection();
         $stmt = $conn->prepare(<<<SQL
-INSERT INTO movies (tmdb_id, title, release_year, runtime_minutes, poster_path, overview)
-VALUES (:tmdb_id, :title, :release_year, :runtime, :poster, :overview)
-ON DUPLICATE KEY UPDATE
-  title=VALUES(title),
-  release_year=VALUES(release_year),
-  runtime_minutes=VALUES(runtime_minutes),
-  poster_path=VALUES(poster_path),
-  overview=VALUES(overview)
-SQL);
+        INSERT INTO movies (tmdb_id, title, release_year, runtime_minutes, poster_path, overview, genre_ids)
+        VALUES (:tmdb_id, :title, :release_year, :runtime, :poster, :overview, :genre_ids)
+        ON DUPLICATE KEY UPDATE
+        title=VALUES(title),
+        release_year=VALUES(release_year),
+        runtime_minutes=VALUES(runtime_minutes),
+        poster_path=VALUES(poster_path),
+        overview=VALUES(overview),
+        genre_ids=VALUES(genre_ids)
+        SQL);
 
         $providerStmt = ($source === 'provider' && $providerId)
         ? $conn->prepare(<<<SQL
@@ -95,6 +96,11 @@ SQL);
             $overview = $r['overview'] ?? null;
             $year = !empty($r['release_date']) ? (int) substr((string) $r['release_date'], 0, 4) : null;
             $runtime = null;
+            $genreIds = isset($r['genre_ids']) && is_array($r['genre_ids'])
+            ? implode(',', $r['genre_ids'])
+            : null;
+
+            $stmt->bindValue('genre_ids', $genreIds);
 
             $stmt->bindValue('tmdb_id', $tmdbId);
             $stmt->bindValue('title', $title);

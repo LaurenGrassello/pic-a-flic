@@ -51,13 +51,17 @@ final class FeedController
                 m.tmdb_id,
                 0 AS is_tv,
                 m.title,
+                m.genre_ids,
                 NULL AS release_date,
-                m.poster_path
+                m.poster_path,
+                tp.provider_id,
+                ss.name AS provider_name
             FROM movies m
             INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
+            LEFT JOIN streaming_services ss ON ss.provider_id = tp.provider_id
             WHERE tp.provider_id IN (:providerIds)
-              AND tp.region = 'US'
-              AND tp.is_tv = 0
+            AND tp.region = 'US'
+            AND tp.is_tv = 0
             ORDER BY m.id DESC
             LIMIT :limit OFFSET :offset
             ",
@@ -76,17 +80,20 @@ final class FeedController
             // fallback if user skipped streaming setup
             $rows = $conn->executeQuery(
                 "
-            SELECT
-                m.id,
-                m.tmdb_id,
-                0 AS is_tv,
-                m.title,
-                NULL AS release_date,
-                m.poster_path
-            FROM movies m
-            ORDER BY m.id DESC
-            LIMIT :limit OFFSET :offset
-            ",
+                SELECT
+                    m.id,
+                    m.tmdb_id,
+                    0 AS is_tv,
+                    m.title,
+                    m.genre_ids,
+                    NULL AS release_date,
+                    m.poster_path,
+                    NULL AS provider_id,
+                    NULL AS provider_name
+                FROM movies m
+                ORDER BY m.id DESC
+                LIMIT :limit OFFSET :offset
+                ",
                 [
                     'limit' => $limit,
                     'offset' => $offset,
