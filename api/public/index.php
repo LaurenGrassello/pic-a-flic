@@ -161,6 +161,12 @@ $app->get('/streaming-services', [$social, 'streamingServices'])->add($authMw);
 $app->get('/profile/streaming-services', [$social, 'myStreamingServices'])->add($authMw);
 $app->post('/profile/username', [$social, 'updateUsername'])->add($authMw);
 
+// Messages
+$messages = $container->get(\PicaFlic\Application\Controller\MessageController::class);
+$app->get('/messages', [$messages, 'index'])->add($authMw);
+$app->get('/messages/unread-count', [$messages, 'unreadCount'])->add($authMw);
+$app->post('/messages', [$messages, 'send'])->add($authMw);
+
 // Personal Watchlists
 $personalWl = $container->get(\PicaFlic\Application\Controller\PersonalWatchlistController::class);
 $app->get('/personal-watchlists', [$personalWl, 'index'])->add($authMw);
