@@ -166,6 +166,7 @@ $messages = $container->get(\PicaFlic\Application\Controller\MessageController::
 $app->get('/messages', [$messages, 'index'])->add($authMw);
 $app->get('/messages/unread-count', [$messages, 'unreadCount'])->add($authMw);
 $app->post('/messages', [$messages, 'send'])->add($authMw);
+$app->get('/messages/thread/{userId}', [$messages, 'thread'])->add($authMw);
 
 // Personal Watchlists
 $personalWl = $container->get(\PicaFlic\Application\Controller\PersonalWatchlistController::class);
