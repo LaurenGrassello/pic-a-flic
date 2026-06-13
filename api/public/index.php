@@ -122,6 +122,7 @@ $profile = $container->get(\PicaFlic\Application\Controller\ProfileController::c
 $app->get('/profile', [$profile, 'getProfile'])->add($authMw);
 $app->put('/profile/password', [$profile, 'changePassword'])->add($authMw);
 $app->put('/profile/services', [$profile, 'setServices'])->add($authMw);
+$app->delete('/profile', [$profile, 'deleteAccount'])->add($authMw);
 
 // ---------------------------------------------------------
 // Quiz
