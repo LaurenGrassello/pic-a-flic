@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     && docker-php-ext-install pdo pdo_mysql zip \
     && a2enmod rewrite \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && ls -la /etc/apache2/mods-enabled/
+    && apache2ctl -M
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
