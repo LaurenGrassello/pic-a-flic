@@ -1,4 +1,35 @@
-
-# secrets
+# secrets / env
 .env
+.env.local
+.env.*.local
 
+# PHP / Composer
+api/vendor/
+api/composer.phar
+
+# Logs
+*.log
+api/var/log/
+api/storage/logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Xcode / iOS
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+**/xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Node (if you have a frontend build step / Vite)
+node_modules/
+dist/
+.vite/
+
+# IDE
+.vscode/
+.idea/
