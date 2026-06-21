@@ -7,9 +7,8 @@ RUN apt-get update && apt-get install -y \
     libzip-dev \
     && docker-php-ext-install pdo pdo_mysql zip \
     && a2enmod rewrite \
-    && a2dismod mpm_event || true \
-    && a2enmod mpm_prefork \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && ls /etc/apache2/mods-enabled/ | grep mpm
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
