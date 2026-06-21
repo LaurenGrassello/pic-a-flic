@@ -37,13 +37,14 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
 EXPOSE 8080
 
-# Fix Railway's MPM conflict at container startup (not build time),
-# set Apache to listen on Railway's $PORT, then launch Apache
+# Fix Railway's MPM conflict + dynamic port binding at container startup
 CMD ["bash", "-lc", "\
     set -e; \
     a2dismod mpm_event mpm_worker > /dev/null 2>&1 || true; \
     rm -f /etc/apache2/mods-enabled/mpm_event.* /etc/apache2/mods-enabled/mpm_worker.* || true; \
     a2enmod mpm_prefork > /dev/null 2>&1 || true; \
-    echo \"Listen ${PORT:-80}\" > /etc/apache2/ports.conf; \
+    PORT=${PORT:-80}; \
+    echo \"Listen $PORT\" > /etc/apache2/ports.conf; \
+    sed -ri \"s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/\" /etc/apache2/sites-enabled/000-default.conf; \
     exec apache2-foreground \
 "]
