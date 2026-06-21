@@ -15,6 +15,15 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Apache should serve from /public
 RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf
 
+# Allow .htaccess overrides (needed for Slim's front-controller rewrite rules)
+RUN { \
+        echo '<Directory /var/www/html/public>'; \
+        echo '    AllowOverride All'; \
+        echo '    Require all granted'; \
+        echo '</Directory>'; \
+    } > /etc/apache2/conf-available/z-app.conf \
+    && a2enconf z-app
+
 WORKDIR /var/www/html
 
 # Copy composer files first (better layer caching)
