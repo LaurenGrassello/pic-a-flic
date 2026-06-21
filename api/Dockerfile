@@ -1,7 +1,13 @@
 FROM php:8.2-apache
 
-# Install system deps + PHP extensions
-RUN docker-php-ext-install pdo pdo_mysql && a2enmod rewrite
+# Install system dependencies needed by Composer and PHP extensions
+RUN apt-get update && apt-get install -y \
+    unzip \
+    zip \
+    libzip-dev \
+    && docker-php-ext-install pdo pdo_mysql zip \
+    && a2enmod rewrite \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
