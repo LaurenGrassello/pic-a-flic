@@ -33,13 +33,10 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction
 # Copy the rest of the app
 COPY . .
 
-RUN mkdir -p var/cache/proxies && vendor/bin/doctrine orm:generate-proxies var/cache/proxies
-
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
 EXPOSE 8080
 
-# Fix Railway's MPM conflict + dynamic port binding at container startup
 CMD ["bash", "-lc", "\
     set -e; \
     a2dismod mpm_event mpm_worker > /dev/null 2>&1 || true; \
@@ -48,5 +45,7 @@ CMD ["bash", "-lc", "\
     PORT=${PORT:-80}; \
     echo \"Listen $PORT\" > /etc/apache2/ports.conf; \
     sed -ri \"s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/\" /etc/apache2/sites-enabled/000-default.conf; \
+    mkdir -p var/cache/proxies; \
+    vendor/bin/doctrine orm:generate-proxies var/cache/proxies || true; \
     exec apache2-foreground \
 "]
