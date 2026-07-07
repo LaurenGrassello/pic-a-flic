@@ -30,10 +30,10 @@ WORKDIR /var/www/html
 COPY composer.json composer.lock* ./
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
-RUN mkdir -p var/cache/proxies && vendor/bin/doctrine orm:generate-proxies var/cache/proxies
-
 # Copy the rest of the app
 COPY . .
+
+RUN mkdir -p var/cache/proxies && vendor/bin/doctrine orm:generate-proxies var/cache/proxies
 
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
