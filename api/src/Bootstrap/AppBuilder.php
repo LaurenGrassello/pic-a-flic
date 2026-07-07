@@ -1,5 +1,5 @@
 <?php
-declare(strict_types=1);
+declare (strict_types = 1);
 
 namespace PicaFlic\Bootstrap;
 
@@ -8,22 +8,21 @@ use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\Setup;
 use Dotenv\Dotenv;
-use Monolog\Handler\StreamHandler;
-use Monolog\Logger;
-use Psr\Container\ContainerInterface;
-use Psr\Log\LoggerInterface;
-
-use PicaFlic\Infrastructure\Tmdb\TmdbClient;
-use PicaFlic\Domain\Repository\MovieRepository;
-use PicaFlic\Infrastructure\Persistence\DoctrineMovieRepository;
-use PicaFlic\Application\Controller\AdminController;
-use PicaFlic\Infrastructure\Service\MailService;
 use function DI\autowire;
-
-// PSR-18 + PSR-17 impls
 use GuzzleHttp\Client as GuzzleClient;
 use Http\Adapter\Guzzle7\Client as GuzzlePsr18Adapter;
+use Monolog\Handler\StreamHandler;
+use Monolog\Logger;
 use Nyholm\Psr7\Factory\Psr17Factory;
+use PicaFlic\Application\Controller\AdminController;
+use PicaFlic\Domain\Repository\MovieRepository;
+use PicaFlic\Infrastructure\Persistence\DoctrineMovieRepository;
+use PicaFlic\Infrastructure\Service\MailService;
+
+// PSR-18 + PSR-17 impls
+use PicaFlic\Infrastructure\Tmdb\TmdbClient;
+use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
 
 final class AppBuilder
 {
@@ -47,23 +46,23 @@ final class AppBuilder
             // -------------------------
             'settings' => static function () {
                 return [
-                    'env'   => $_ENV['APP_ENV']  ?? 'dev',
-                    'debug' => (bool)($_ENV['APP_DEBUG'] ?? true),
+                    'env' => $_ENV['APP_ENV'] ?? 'dev',
+                    'debug' => (bool) ($_ENV['APP_DEBUG'] ?? true),
 
                     'db' => [
-                        'dsn'     => $_ENV['DATABASE_URL'] ?? $_ENV['DB_DSN'] ?? null, // prefer DATABASE_URL if set
-                        'host'    => $_ENV['DB_HOST']  ?? 'db',
-                        'port'    => (int)($_ENV['DB_PORT'] ?? 3306),
-                        'name'    => $_ENV['DB_NAME']  ?? 'picaflic',
-                        'user'    => $_ENV['DB_USER']  ?? 'root',
-                        'pass'    => $_ENV['DB_PASS']  ?? 'password',
+                        'dsn' => $_ENV['DATABASE_URL'] ?? $_ENV['DB_DSN'] ?? null, // prefer DATABASE_URL if set
+                        'host' => $_ENV['DB_HOST'] ?? 'db',
+                        'port' => (int) ($_ENV['DB_PORT'] ?? 3306),
+                        'name' => $_ENV['DB_NAME'] ?? 'picaflic',
+                        'user' => $_ENV['DB_USER'] ?? 'root',
+                        'pass' => $_ENV['DB_PASS'] ?? 'password',
                         'charset' => $_ENV['DB_CHARSET'] ?? 'utf8mb4',
                     ],
 
                     'jwt' => [
-                        'secret'       => $_ENV['JWT_SECRET']           ?? 'dev_secret_change_me',
-                        'ttl'          => (int)($_ENV['JWT_TTL']        ?? 8 * 60 * 60),            // 8h
-                        'refresh_ttl'  => (int)($_ENV['JWT_REFRESH_TTL'] ?? 14 * 24 * 60 * 60),    // 14d
+                        'secret' => $_ENV['JWT_SECRET'] ?? 'dev_secret_change_me',
+                        'ttl' => (int) ($_ENV['JWT_TTL'] ?? 8 * 60 * 60), // 8h
+                        'refresh_ttl' => (int) ($_ENV['JWT_REFRESH_TTL'] ?? 14 * 24 * 60 * 60), // 14d
                     ],
                 ];
             },
@@ -86,25 +85,25 @@ final class AppBuilder
                 $config = Setup::createAttributeMetadataConfiguration(
                     $entityPaths,
                     $debug,
-                    null,
+                    $basePath . '/var/cache/proxies',
                     null,
                     false
                 );
 
-                $db  = $c->get('settings')['db'];
+                $db = $c->get('settings')['db'];
                 $dsn = $db['dsn'] ?? null;
 
                 if (is_string($dsn) && $dsn !== '' && str_contains($dsn, '://')) {
                     $conn = ['url' => $dsn]; // Doctrine URL form (DATABASE_URL)
                 } else {
                     $conn = [
-                        'driver'   => 'pdo_mysql',
-                        'host'     => $db['host'],
-                        'port'     => $db['port'],
-                        'dbname'   => $db['name'],
-                        'user'     => $db['user'],
+                        'driver' => 'pdo_mysql',
+                        'host' => $db['host'],
+                        'port' => $db['port'],
+                        'dbname' => $db['name'],
+                        'user' => $db['user'],
                         'password' => $db['pass'],
-                        'charset'  => $db['charset'],
+                        'charset' => $db['charset'],
                         'driverOptions' => [
                             \PDO::MYSQL_ATTR_INIT_COMMAND => 'SET NAMES ' . $db['charset'],
                         ],
@@ -120,17 +119,17 @@ final class AppBuilder
             // TMDb client (PSR-18/PSR-17)
             // -------------------------
             TmdbClient::class => static function () {
-    $v3 = $_ENV['TMDB_API_KEY'] ?? getenv('TMDB_API_KEY') ?: '';
-    if ($v3 === '') {
-        throw new \RuntimeException('TMDB_API_KEY missing (set in api/.env)');
-    }
+                $v3 = $_ENV['TMDB_API_KEY'] ?? getenv('TMDB_API_KEY') ?: '';
+                if ($v3 === '') {
+                    throw new \RuntimeException('TMDB_API_KEY missing (set in api/.env)');
+                }
 
-    // PSR-18 HTTP client + PSR-17 factories
-    $http  = new GuzzlePsr18Adapter(new GuzzleClient());
-    $psr17 = new Psr17Factory();
+                // PSR-18 HTTP client + PSR-17 factories
+                $http = new GuzzlePsr18Adapter(new GuzzleClient());
+                $psr17 = new Psr17Factory();
 
-    return new TmdbClient($v3, $http, $psr17);
-},
+                return new TmdbClient($v3, $http, $psr17);
+            },
 
             // -------------------------
             // Domain repository bindings
