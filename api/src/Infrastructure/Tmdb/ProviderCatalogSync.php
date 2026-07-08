@@ -93,65 +93,97 @@ final class ProviderCatalogSync
      * @param int    $maxPagesPerYear 0 = no cap
      */
     public function backfill(
-        array $providerIds,
-        bool $tv,
-        int $fromYear = null,
-        int $toYear = 1950,
-        string $monetization = 'flatrate|free|ads',
-        int $maxPagesPerYear = 0
-    ): void {
-        if (!$providerIds) return;
+    array $providerIds,
+    bool $tv,
+    int $fromYear = null,
+    int $toYear = 1950,
+    string $monetization = 'flatrate|free|ads',
+    int $maxPagesPerYear = 0
+): void {
+    if (!$providerIds) return;
 
-        $type      = $tv ? 'tv' : 'movie';
-        $fromYear ??= (int)date('Y');
+    $type      = $tv ? 'tv' : 'movie';
+    $fromYear ??= (int)date('Y');
 
-        $conn    = $this->em->getConnection();
-        $provStr = implode('|', $providerIds); // TMDB OR syntax
+    $conn    = $this->em->getConnection();
+    $provStr = implode('|', $providerIds); // TMDB OR syntax
 
-        for ($year = $fromYear; $year >= $toYear; $year--) {
-            $page = 1;
-            do {
-                $params = [
-                    'with_watch_providers'          => $provStr,
-                    'watch_region'                  => $this->region,
-                    'with_watch_monetization_types' => $monetization,
-                    'sort_by'                       => 'popularity.desc',
-                    'page'                          => $page,
-                    'include_adult'                 => 'false',
-                ];
-                if ($tv)  { $params['first_air_date_year']  = $year; }
-                else      { $params['primary_release_year'] = $year; }
+    $movieStmt = $conn->prepare(<<<SQL
+        INSERT INTO movies (tmdb_id, title, release_year, runtime_minutes, poster_path, overview, genre_ids)
+        VALUES (:tmdb_id, :title, :release_year, :runtime, :poster, :overview, :genre_ids)
+        ON DUPLICATE KEY UPDATE
+        title=VALUES(title),
+        release_year=VALUES(release_year),
+        poster_path=VALUES(poster_path),
+        overview=VALUES(overview),
+        genre_ids=VALUES(genre_ids)
+        SQL);
 
-                $data       = $this->tmdb->discover($type, $params);
-                $totalPages = (int)($data['total_pages'] ?? 1);
-                if ($maxPagesPerYear > 0) $totalPages = min($totalPages, $maxPagesPerYear);
+    for ($year = $fromYear; $year >= $toYear; $year--) {
+        $page = 1;
+        do {
+            $params = [
+                'with_watch_providers'          => $provStr,
+                'watch_region'                  => $this->region,
+                'with_watch_monetization_types' => $monetization,
+                'sort_by'                       => 'popularity.desc',
+                'page'                          => $page,
+                'include_adult'                 => 'false',
+            ];
+            if ($tv)  { $params['first_air_date_year']  = $year; }
+            else      { $params['primary_release_year'] = $year; }
 
-                if (PHP_SAPI === 'cli') {
-                    fwrite(STDERR, sprintf(
-                        "[sync] %s %d page %d/%d, batch=%d\n",
-                        $type, $year, $page, $totalPages, count($data['results'] ?? [])
-                    ));
+            $data       = $this->tmdb->discover($type, $params);
+            $totalPages = (int)($data['total_pages'] ?? 1);
+            if ($maxPagesPerYear > 0) $totalPages = min($totalPages, $maxPagesPerYear);
+
+            if (PHP_SAPI === 'cli') {
+                fwrite(STDERR, sprintf(
+                    "[sync] %s %d page %d/%d, batch=%d\n",
+                    $type, $year, $page, $totalPages, count($data['results'] ?? [])
+                ));
+            }
+
+            foreach (($data['results'] ?? []) as $row) {
+                $tmdbId = (int)$row['id'];
+
+                // Upsert movie row
+                $title    = (string)($row['title'] ?? $row['name'] ?? '');
+                $poster   = $row['poster_path'] ?? null;
+                $overview = $row['overview'] ?? null;
+                $rowYear  = !empty($row['release_date'] ?? $row['first_air_date'] ?? null)
+                    ? (int) substr((string)($row['release_date'] ?? $row['first_air_date']), 0, 4)
+                    : null;
+                $genreIds = isset($row['genre_ids']) && is_array($row['genre_ids'])
+                    ? implode(',', $row['genre_ids'])
+                    : null;
+
+                $movieStmt->bindValue('tmdb_id', $tmdbId);
+                $movieStmt->bindValue('title', $title);
+                $movieStmt->bindValue('release_year', $rowYear, $rowYear === null ? \PDO::PARAM_NULL : \PDO::PARAM_INT);
+                $movieStmt->bindValue('runtime', null, \PDO::PARAM_NULL);
+                $movieStmt->bindValue('poster', $poster);
+                $movieStmt->bindValue('overview', $overview);
+                $movieStmt->bindValue('genre_ids', $genreIds);
+                $movieStmt->executeStatement();
+
+                // Upsert title_providers rows (unchanged)
+                foreach ($providerIds as $pid) {
+                    $conn->executeStatement(
+                        "INSERT INTO title_providers (tmdb_id, is_tv, provider_id, region)
+                         VALUES (:tid, :is_tv, :pid, :region)
+                         ON DUPLICATE KEY UPDATE tmdb_id = tmdb_id",
+                        [
+                            'tid'    => $tmdbId,
+                            'is_tv'  => $tv ? 1 : 0,
+                            'pid'    => (int)$pid,
+                            'region' => $this->region,
+                        ]
+                    );
                 }
+            }
 
-                foreach (($data['results'] ?? []) as $row) {
-                    $tmdbId = (int)$row['id'];
-                    foreach ($providerIds as $pid) {
-                        $conn->executeStatement(
-                            "INSERT INTO title_providers (tmdb_id, is_tv, provider_id, region)
-                             VALUES (:tid, :is_tv, :pid, :region)
-                             ON DUPLICATE KEY UPDATE tmdb_id = tmdb_id",
-                            [
-                                'tid'    => $tmdbId,
-                                'is_tv'  => $tv ? 1 : 0,
-                                'pid'    => (int)$pid,
-                                'region' => $this->region,
-                            ]
-                        );
-                    }
-                }
-
-                $page++;
-            } while ($page <= $totalPages);
-        }
+            $page++;
+        } while ($page <= $totalPages);
     }
 }
