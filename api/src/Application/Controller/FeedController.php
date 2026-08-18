@@ -43,10 +43,9 @@ final class FeedController
         $providerIds = $this->getUserSelectedProviderIds($me);
         $conn = $this->em->getConnection();
 
-        if (!empty($providerIds)) {
-            $rows = $conn->executeQuery(
+        $rows = $conn->executeQuery(
                 "
-            SELECT DISTINCT
+            SELECT
                 m.id,
                 m.tmdb_id,
                 0 AS is_tv,
@@ -54,17 +53,18 @@ final class FeedController
                 m.genre_ids,
                 NULL AS release_date,
                 m.poster_path,
-                tp.provider_id,
-                ss.name AS provider_name
+                GROUP_CONCAT(DISTINCT tp.provider_id ORDER BY tp.provider_id) AS provider_ids,
+                GROUP_CONCAT(DISTINCT ss.name ORDER BY tp.provider_id SEPARATOR '|') AS provider_names
             FROM movies m
             INNER JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id
             LEFT JOIN streaming_services ss ON ss.provider_id = tp.provider_id
             WHERE tp.provider_id IN (:providerIds)
             AND tp.region = 'US'
             AND tp.is_tv = 0
+            GROUP BY m.id, m.tmdb_id, m.title, m.genre_ids, m.poster_path
             ORDER BY m.id DESC
             LIMIT :limit OFFSET :offset
-            ",
+                ",
                 [
                     'providerIds' => $providerIds,
                     'limit' => $limit,
@@ -76,34 +76,6 @@ final class FeedController
                     'offset' => \PDO::PARAM_INT,
                 ]
             )->fetchAllAssociative();
-        } else {
-            // fallback if user skipped streaming setup
-            $rows = $conn->executeQuery(
-                "
-                SELECT
-                    m.id,
-                    m.tmdb_id,
-                    0 AS is_tv,
-                    m.title,
-                    m.genre_ids,
-                    NULL AS release_date,
-                    m.poster_path,
-                    NULL AS provider_id,
-                    NULL AS provider_name
-                FROM movies m
-                ORDER BY m.id DESC
-                LIMIT :limit OFFSET :offset
-                ",
-                [
-                    'limit' => $limit,
-                    'offset' => $offset,
-                ],
-                [
-                    'limit' => \PDO::PARAM_INT,
-                    'offset' => \PDO::PARAM_INT,
-                ]
-            )->fetchAllAssociative();
-        }
 
         $res->getBody()->write(json_encode([
             'results' => $rows,
