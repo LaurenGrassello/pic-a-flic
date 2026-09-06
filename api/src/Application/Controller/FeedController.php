@@ -44,7 +44,7 @@ final class FeedController
         $conn = $this->em->getConnection();
 
         $rows = $conn->executeQuery(
-                "
+            "
             SELECT
                 m.id,
                 m.tmdb_id,
@@ -62,20 +62,20 @@ final class FeedController
             AND tp.region = 'US'
             AND tp.is_tv = 0
             GROUP BY m.id, m.tmdb_id, m.title, m.genre_ids, m.poster_path
-            ORDER BY m.id DESC
+            ORDER BY m.popularity DESC, m.id DESC
             LIMIT :limit OFFSET :offset
                 ",
-                [
-                    'providerIds' => $providerIds,
-                    'limit' => $limit,
-                    'offset' => $offset,
-                ],
-                [
-                    'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
-                    'limit' => \PDO::PARAM_INT,
-                    'offset' => \PDO::PARAM_INT,
-                ]
-            )->fetchAllAssociative();
+            [
+                'providerIds' => $providerIds,
+                'limit' => $limit,
+                'offset' => $offset,
+            ],
+            [
+                'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                'limit' => \PDO::PARAM_INT,
+                'offset' => \PDO::PARAM_INT,
+            ]
+        )->fetchAllAssociative();
 
         $res->getBody()->write(json_encode([
             'results' => $rows,

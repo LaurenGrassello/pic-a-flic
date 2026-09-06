@@ -293,16 +293,24 @@ final class AuthController
         if (!$uid) {
             return $this->json($res, ['error' => 'Unauthorized'], 401);
         }
-
         $user = $this->em->find(User::class, $uid);
         if (!$user) {
             return $this->json($res, ['error' => 'Not found'], 404);
         }
 
+        $serviceRows = $this->em->getRepository(UserStreamingService::class)->findBy(['user' => $user]);
+        $services = array_map(function (UserStreamingService $row) {
+            return [
+                'provider_id' => $row->getProviderId(),
+                'name' => $row->getService()->getName(),
+            ];
+        }, $serviceRows);
+
         return $this->json($res, [
             'id' => $user->getId(),
             'email' => $user->getEmail(),
             'display_name' => $user->getDisplayName(),
+            'streaming_services' => $services,
         ]);
     }
 }

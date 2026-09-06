@@ -31,8 +31,8 @@ $tmdb = $container->get(TmdbClient::class);
 $conn = $em->getConnection();
 
 // ---- Config ----
-const TARGET_TITLES_PER_PROVIDER = 100;
-const RESULTS_PER_PAGE = 20; // TMDB's fixed page size
+const TARGET_TITLES_PER_PROVIDER = 1000;
+const RESULTS_PER_PAGE = 200; // TMDB's fixed page size
 const REGION = 'US';
 const REQUEST_DELAY_MICROSECONDS = 300_000; // ~3.3 req/sec, safely under TMDB limits
 
