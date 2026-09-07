@@ -995,8 +995,8 @@ final class SocialController
         $movieId = (int) ($data['movie_id'] ?? 0);
         $status = trim((string) ($data['status'] ?? ''));
 
-        if (!in_array($status, ['liked', 'disliked'], true)) {
-            return $this->json($res, ['error' => 'Status must be liked or disliked'], 422);
+        if (!in_array($status, ['liked', 'disliked', 'none'], true)) {
+            return $this->json($res, ['error' => 'Status must be liked, disliked, or none'], 422);
         }
 
         /** @var Movie|null $movie */
@@ -1007,6 +1007,18 @@ final class SocialController
 
         $repo = $this->em->getRepository(UserMoviePreference::class);
         $existing = $repo->findOneBy(['user' => $me, 'movie' => $movie]);
+
+        if ($status === 'none') {
+            if ($existing) {
+                $this->em->remove($existing);
+                $this->em->flush();
+            }
+            return $this->json($res, [
+                'ok' => true,
+                'movie_id' => $movieId,
+                'status' => 'none',
+            ]);
+        }
 
         if ($existing) {
             $existing->setStatus($status);
