@@ -583,8 +583,16 @@ final class SocialController
         $movieId = (int) ($data['movie_id'] ?? 0);
         $status = trim((string) ($data['status'] ?? ''));
 
-        if (!in_array($status, ['picked', 'passed'], true)) {
-            return $this->json($res, ['error' => 'Status must be picked or passed'], 422);
+        if (!in_array($status, ['liked', 'disliked', 'none'], true)) {
+            return $this->json($res, ['error' => 'Status must be liked, disliked, or none'], 422);
+        }
+
+        if ($movieId <= 0) {
+            $tmdbId = (int) ($data['tmdb_id'] ?? 0);
+            if ($tmdbId <= 0) {
+                return $this->json($res, ['error' => 'movie_id or tmdb_id required'], 422);
+            }
+            $movieId = $this->findOrCreateMovieId($this->em->getConnection(), $tmdbId, $data);
         }
 
         /** @var Movie|null $movie */
@@ -1040,6 +1048,53 @@ final class SocialController
         $conn->delete('watchlists', ['id' => $watchlistId]);
 
         return $this->json($res, ['ok' => true]);
+    }
+
+    /**
+     * Finds the local `movies` row for a TMDB id, inserting one if it doesn't
+     * exist yet — mirrors the same helper added to PersonalWatchlistController.
+     */
+    private function findOrCreateMovieId(\Doctrine\DBAL\Connection $conn, int $tmdbId, array $data): int
+    {
+        $existingId = $conn->fetchOne("SELECT id FROM movies WHERE tmdb_id = ?", [$tmdbId]);
+        if ($existingId !== false) {
+            return (int) $existingId;
+        }
+
+        $title = trim((string) ($data['title'] ?? ''));
+        $posterPath = $data['poster_path'] ?? null;
+        $genreIds = $data['genre_ids'] ?? null;
+
+        $releaseYear = null;
+        if (!empty($data['release_date'])) {
+            $releaseYear = (int) substr((string) $data['release_date'], 0, 4);
+            if ($releaseYear <= 0) {
+                $releaseYear = null;
+            }
+        }
+
+        $popularity = null;
+        if (isset($data['popularity']) && is_numeric($data['popularity'])) {
+            $popularity = (int) round((float) $data['popularity']);
+        }
+
+        try {
+            $conn->insert('movies', [
+                'tmdb_id' => $tmdbId,
+                'title' => $title !== '' ? $title : 'Untitled',
+                'release_year' => $releaseYear,
+                'poster_path' => $posterPath,
+                'genre_ids' => $genreIds,
+                'popularity' => $popularity,
+            ]);
+            return (int) $conn->lastInsertId();
+        } catch (\Throwable $e) {
+            $existingId = $conn->fetchOne("SELECT id FROM movies WHERE tmdb_id = ?", [$tmdbId]);
+            if ($existingId !== false) {
+                return (int) $existingId;
+            }
+            throw $e;
+        }
     }
 
     public function setPreference(Request $req, Response $res): Response
