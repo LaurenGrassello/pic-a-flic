@@ -3,6 +3,7 @@ declare (strict_types = 1);
 
 namespace PicaFlic\Application\Controller;
 
+use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PicaFlic\Domain\Entity\Friendship;
 use PicaFlic\Domain\Entity\User;
@@ -41,6 +42,58 @@ final class PersonalWatchlistController
             ->getOneOrNullResult();
 
         return $friendship !== null && $friendship->getStatus() === 'accepted';
+    }
+
+    /**
+     * Finds the local `movies` row for a TMDB id, inserting one if it doesn't
+     * exist yet. This is what lets a movie/show fresh out of search (which has
+     * no local id yet) get added straight to a watchlist.
+     *
+     * $data is expected to (optionally) contain: title, poster_path, genre_ids,
+     * release_date (a "YYYY-MM-DD" string, or null), popularity.
+     */
+    private function findOrCreateMovie(Connection $conn, int $tmdbId, array $data): int
+    {
+        $existingId = $conn->fetchOne("SELECT id FROM movies WHERE tmdb_id = ?", [$tmdbId]);
+        if ($existingId !== false) {
+            return (int) $existingId;
+        }
+
+        $title = trim((string) ($data['title'] ?? ''));
+        $posterPath = $data['poster_path'] ?? null;
+        $genreIds = $data['genre_ids'] ?? null;
+
+        $releaseYear = null;
+        if (!empty($data['release_date'])) {
+            $releaseYear = (int) substr((string) $data['release_date'], 0, 4);
+            if ($releaseYear <= 0) {
+                $releaseYear = null;
+            }
+        }
+
+        $popularity = null;
+        if (isset($data['popularity']) && is_numeric($data['popularity'])) {
+            $popularity = (int) round((float) $data['popularity']);
+        }
+
+        try {
+            $conn->insert('movies', [
+                'tmdb_id' => $tmdbId,
+                'title' => $title !== '' ? $title : 'Untitled',
+                'release_year' => $releaseYear,
+                'poster_path' => $posterPath,
+                'genre_ids' => $genreIds,
+                'popularity' => $popularity,
+            ]);
+            return (int) $conn->lastInsertId();
+        } catch (\Throwable $e) {
+            // Race: another request inserted this tmdb_id between our SELECT and INSERT.
+            $existingId = $conn->fetchOne("SELECT id FROM movies WHERE tmdb_id = ?", [$tmdbId]);
+            if ($existingId !== false) {
+                return (int) $existingId;
+            }
+            throw $e;
+        }
     }
 
     /** GET /personal-watchlists */
@@ -126,7 +179,12 @@ final class PersonalWatchlistController
         return $this->json($res, ['results' => $rows]);
     }
 
-    /** POST /personal-watchlists/{id}/movies  { movie_id } */
+    /**
+     * POST /personal-watchlists/{id}/movies
+     *   { movie_id }  — existing local movie, OR
+     *   { tmdb_id, title?, poster_path?, genre_ids?, release_date?, popularity? }
+     *     — a movie/show that may not exist locally yet; we find-or-create it.
+     */
     public function addMovie(Request $req, Response $res, array $args): Response
     {
         $meId = (int) $req->getAttribute('uid');
@@ -146,8 +204,13 @@ final class PersonalWatchlistController
 
         $data = json_decode((string) $req->getBody(), true) ?: [];
         $movieId = (int) ($data['movie_id'] ?? 0);
+
         if ($movieId <= 0) {
-            return $this->json($res, ['error' => 'movie_id required'], 422);
+            $tmdbId = (int) ($data['tmdb_id'] ?? 0);
+            if ($tmdbId <= 0) {
+                return $this->json($res, ['error' => 'movie_id or tmdb_id required'], 422);
+            }
+            $movieId = $this->findOrCreateMovie($conn, $tmdbId, $data);
         }
 
         try {
