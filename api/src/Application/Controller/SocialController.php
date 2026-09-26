@@ -978,6 +978,70 @@ final class SocialController
         return $this->json($res, ['results' => $results]);
     }
 
+    /** PATCH /social/watchlists/{watchlistId}  { name } */
+    public function renameWatchlist(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+        if (!$watchlist) {
+            return $this->json($res, ['error' => 'Watchlist not found'], 404);
+        }
+
+        if ($watchlist->getCreatedBy()->getId() !== $meId) {
+            return $this->json($res, ['error' => 'Only the watchlist owner can rename it'], 403);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $name = trim((string) ($data['name'] ?? ''));
+        if ($name === '') {
+            return $this->json($res, ['error' => 'Watchlist name is required'], 422);
+        }
+
+        $conn = $this->em->getConnection();
+        $conn->update('watchlists', ['name' => $name], ['id' => $watchlistId]);
+
+        return $this->json($res, ['ok' => true, 'watchlist' => ['id' => $watchlistId, 'name' => $name]]);
+    }
+
+/** DELETE /social/watchlists/{watchlistId} */
+    public function deleteWatchlist(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $watchlistId = (int) ($args['watchlistId'] ?? 0);
+
+        if ($meId <= 0 || $watchlistId <= 0) {
+            return $this->json($res, ['error' => 'Invalid request'], 422);
+        }
+
+        /** @var Watchlist|null $watchlist */
+        $watchlist = $this->em->find(Watchlist::class, $watchlistId);
+        if (!$watchlist) {
+            return $this->json($res, ['error' => 'Watchlist not found'], 404);
+        }
+
+        if ($watchlist->getCreatedBy()->getId() !== $meId) {
+            return $this->json($res, ['error' => 'Only the watchlist owner can delete it'], 403);
+        }
+
+        // Raw SQL cleanup — matches this codebase's pattern of not relying on
+        // cascade rules for the watchlist join tables.
+        $conn = $this->em->getConnection();
+        $conn->delete('watchlist_swipes', ['watchlist_id' => $watchlistId]);
+        $conn->delete('watchlist_movies', ['watchlist_id' => $watchlistId]);
+        $conn->delete('watchlist_invites', ['watchlist_id' => $watchlistId]);
+        $conn->delete('watchlist_members', ['watchlist_id' => $watchlistId]);
+        $conn->delete('watchlists', ['id' => $watchlistId]);
+
+        return $this->json($res, ['ok' => true]);
+    }
+
     public function setPreference(Request $req, Response $res): Response
     {
         $meId = (int) $req->getAttribute('uid');

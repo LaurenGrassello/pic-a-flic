@@ -427,6 +427,35 @@ final class PersonalWatchlistController
         return $this->json($res, ['results' => $rows]);
     }
 
+    /** PATCH /personal-watchlists/{id}  { name } */
+    public function rename(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $wlId = (int) ($args['id'] ?? 0);
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        $conn = $this->em->getConnection();
+
+        $owner = $conn->fetchOne(
+            "SELECT user_id FROM personal_watchlists WHERE id = ?", [$wlId]
+        );
+        if ((int) $owner !== $meId) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        $data = json_decode((string) $req->getBody(), true) ?: [];
+        $name = trim((string) ($data['name'] ?? ''));
+        if ($name === '') {
+            return $this->json($res, ['error' => 'Name is required'], 422);
+        }
+
+        $conn->update('personal_watchlists', ['name' => $name], ['id' => $wlId]);
+
+        return $this->json($res, ['ok' => true, 'watchlist' => ['id' => $wlId, 'name' => $name]]);
+    }
+
     /** POST /personal-watchlists/shares/{shareId}/swipe  { movie_id, status } */
     public function shareSwipe(Request $req, Response $res, array $args): Response
     {
