@@ -38,11 +38,81 @@ final class FeedController
         $q = $req->getQueryParams();
         $limit = min(100, max(1, (int) ($q['limit'] ?? 20)));
         $offset = max(0, (int) ($q['offset'] ?? 0));
+        $seed = isset($q['seed']) ? (int) $q['seed'] : null;
 
         $providerIds = $this->getUserSelectedProviderIds($me);
         $conn = $this->em->getConnection();
 
-        $rows = $conn->executeQuery(
+        // --- Exclusions: liked (permanent), watchlisted (permanent), disliked (21-day cooldown) ---
+        $prefRepo = $this->em->getRepository(\PicaFlic\Domain\Entity\UserMoviePreference::class);
+        $prefs = $prefRepo->findBy(['user' => $me]);
+
+        $excludedMovieIds = [];
+        $likedGenreTally = [];
+        $cooldownCutoff = (new \DateTimeImmutable())->modify('-21 days');
+
+        foreach ($prefs as $pref) {
+            $status = $pref->getStatus();
+            $movie = $pref->getMovie();
+            $movieId = $movie->getId();
+
+            if ($status === 'liked') {
+                $excludedMovieIds[] = $movieId;
+
+                $genreIds = method_exists($movie, 'getGenreIds') ? $movie->getGenreIds() : null;
+                if ($genreIds) {
+                    foreach (explode(',', (string) $genreIds) as $gid) {
+                        $gid = trim($gid);
+                        if ($gid === '') {
+                            continue;
+                        }
+                        $likedGenreTally[$gid] = ($likedGenreTally[$gid] ?? 0) + 1;
+                    }
+                }
+            } elseif ($status === 'disliked') {
+                if ($pref->getUpdatedAt() > $cooldownCutoff) {
+                    $excludedMovieIds[] = $movieId;
+                }
+            }
+        }
+
+        // Movies already sitting in any of the user's personal watchlists
+        $watchlistedIds = $conn->fetchFirstColumn(
+            "SELECT DISTINCT pwm.movie_id
+            FROM personal_watchlist_movies pwm
+            JOIN personal_watchlists pw ON pw.id = pwm.watchlist_id
+            WHERE pw.user_id = ?",
+            [$meId]
+        );
+        $excludedMovieIds = array_values(array_unique(array_merge(
+            $excludedMovieIds,
+            array_map('intval', $watchlistedIds)
+        )));
+
+        // Top 3 favorite genres, by frequency across liked movies
+        arsort($likedGenreTally);
+        $favoriteGenreIds = array_slice(array_keys($likedGenreTally), 0, 3);
+
+        // --- Candidate pool: popular-side, filtered, capped ---
+        $poolCap = 400;
+
+        $excludedSql = '';
+        $params = [
+            'providerIds' => $providerIds,
+            'poolCap' => $poolCap,
+        ];
+        $types = [
+            'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+            'poolCap' => \PDO::PARAM_INT,
+        ];
+
+        if (!empty($excludedMovieIds)) {
+            $excludedSql = ' AND m.id NOT IN (:excludedIds)';
+            $params['excludedIds'] = $excludedMovieIds;
+            $types['excludedIds'] = \Doctrine\DBAL\ArrayParameterType::INTEGER;
+        }
+
+        $pool = $conn->executeQuery(
             "
             SELECT
                 m.id,
@@ -52,6 +122,7 @@ final class FeedController
                 m.genre_ids,
                 NULL AS release_date,
                 m.poster_path,
+                m.popularity,
                 GROUP_CONCAT(DISTINCT tp.provider_id ORDER BY tp.provider_id) AS provider_ids,
                 GROUP_CONCAT(DISTINCT ss.name ORDER BY tp.provider_id SEPARATOR '|') AS provider_names
             FROM movies m
@@ -60,33 +131,58 @@ final class FeedController
             WHERE tp.provider_id IN (:providerIds)
             AND tp.region = 'US'
             AND tp.is_tv = 0
-            GROUP BY m.id, m.tmdb_id, m.title, m.genre_ids, m.poster_path
+            {$excludedSql}
+            GROUP BY m.id, m.tmdb_id, m.title, m.genre_ids, m.poster_path, m.popularity
             ORDER BY m.popularity DESC, m.id DESC
-            LIMIT :limit OFFSET :offset
-                ",
-            [
-                'providerIds' => $providerIds,
-                'limit' => $limit,
-                'offset' => $offset,
-            ],
-            [
-                'providerIds' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
-                'limit' => \PDO::PARAM_INT,
-                'offset' => \PDO::PARAM_INT,
-            ]
+            LIMIT :poolCap
+            ",
+            $params,
+            $types
         )->fetchAllAssociative();
 
-        $res->getBody()->write(json_encode([
-            'results' => $rows,
+        // --- Score + shuffle the pool: popularity rank + genre affinity + seeded jitter ---
+        $poolSize = count($pool);
+
+        if ($seed !== null) {
+            mt_srand($seed);
+        }
+
+        foreach ($pool as $i => &$row) {
+            // Position in the popularity-sorted pool -> base score (1.0 = most popular)
+            $baseScore = $poolSize > 1 ? 1 - ($i / ($poolSize - 1)) : 1;
+
+            $genreBonus = 0.0;
+            if (!empty($favoriteGenreIds) && !empty($row['genre_ids'])) {
+                $rowGenres = array_map('trim', explode(',', (string) $row['genre_ids']));
+                if (array_intersect($favoriteGenreIds, $rowGenres)) {
+                    $genreBonus = 0.25;
+                }
+            }
+
+            // Only jitters (reshuffles) when the client sends a seed; omitting it keeps stable ordering
+            $jitter = $seed !== null ? (mt_rand() / mt_getrandmax()) * 0.3 : 0.0;
+
+            $row['_score'] = $baseScore + $genreBonus + $jitter;
+        }
+        unset($row);
+
+        usort($pool, fn($a, $b) => $b['_score'] <=> $a['_score']);
+
+        $paged = array_slice($pool, $offset, $limit);
+        foreach ($paged as &$row) {
+            unset($row['_score'], $row['popularity']);
+        }
+        unset($row);
+
+        return $this->json($res, [
+            'results' => $paged,
             'meta' => [
                 'limit' => $limit,
                 'offset' => $offset,
-                'count' => count($rows),
-                'has_more' => count($rows) === $limit,
+                'count' => count($paged),
+                'has_more' => ($offset + $limit) < count($pool),
             ],
-        ]));
-
-        return $res->withHeader('Content-Type', 'application/json');
+        ]);
     }
 
     private function getUserSelectedProviderIds(\PicaFlic\Domain\Entity\User $user): array
