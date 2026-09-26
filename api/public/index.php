@@ -177,6 +177,14 @@ $app->get('/personal-watchlists/{id}/movies', [$personalWl, 'movies'])->add($aut
 $app->post('/personal-watchlists/{id}/movies', [$personalWl, 'addMovie'])->add($authMw);
 $app->delete('/personal-watchlists/{id}/movies/{movieId}', [$personalWl, 'removeMovie'])->add($authMw);
 $app->delete('/personal-watchlists/{id}', [$personalWl, 'delete'])->add($authMw);
+$app->post('/personal-watchlists/{id}/share', [$personalWl, 'share'])->add($authMw);
+$app->get('/personal-watchlists/shares/received', [$personalWl, 'receivedShares'])->add($authMw);
+$app->get('/personal-watchlists/shares/{shareId}', [$personalWl, 'shareInfo'])->add($authMw);
+$app->post('/personal-watchlists/shares/{shareId}/accept', [$personalWl, 'acceptShare'])->add($authMw);
+$app->post('/personal-watchlists/shares/{shareId}/decline', [$personalWl, 'declineShare'])->add($authMw);
+$app->get('/personal-watchlists/shares/{shareId}/deck', [$personalWl, 'shareDeck'])->add($authMw);
+$app->post('/personal-watchlists/shares/{shareId}/swipe', [$personalWl, 'shareSwipe'])->add($authMw);
+$app->get('/personal-watchlists/shares/{shareId}/matches', [$personalWl, 'shareMatches'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
