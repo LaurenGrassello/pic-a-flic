@@ -163,6 +163,7 @@ $app->post('/profile/username', [$social, 'updateUsername'])->add($authMw);
 $app->get('/social/watchlists/{watchlistId}', [$social, 'watchlist'])->add($authMw);
 $app->patch('/social/watchlists/{watchlistId}', [$social, 'renameWatchlist'])->add($authMw);
 $app->delete('/social/watchlists/{watchlistId}', [$social, 'deleteWatchlist'])->add($authMw);
+$app->patch('/personal-watchlists/{id}', [$personalWl, 'rename'])->add($authMw);
 
 // Messages
 $messages = $container->get(\PicaFlic\Application\Controller\MessageController::class);
