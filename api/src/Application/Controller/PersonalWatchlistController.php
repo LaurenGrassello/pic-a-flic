@@ -593,6 +593,40 @@ final class PersonalWatchlistController
         ]);
     }
 
+    /** GET /personal-watchlists/{id}/shares — owner-only: who this watchlist has been shared with. */
+    public function sentShares(Request $req, Response $res, array $args): Response
+    {
+        $meId = (int) $req->getAttribute('uid');
+        $wlId = (int) ($args['id'] ?? 0);
+        if ($meId <= 0) {
+            return $this->json($res, ['error' => 'Unauthorized'], 401);
+        }
+
+        $conn = $this->em->getConnection();
+
+        $owner = $conn->fetchOne(
+            "SELECT user_id FROM personal_watchlists WHERE id = ?", [$wlId]
+        );
+        if ((int) $owner !== $meId) {
+            return $this->json($res, ['error' => 'Forbidden'], 403);
+        }
+
+        $rows = $conn->fetchAllAssociative(
+            "SELECT pws.id AS share_id, pws.shared_with_user_id,
+                    u.display_name AS shared_with_display_name,
+                    pws.status,
+                    (SELECT COUNT(*) FROM personal_watchlist_swipes s
+                        WHERE s.share_id = pws.id AND s.status = 'picked') AS match_count
+             FROM personal_watchlist_shares pws
+             JOIN users u ON u.id = pws.shared_with_user_id
+             WHERE pws.watchlist_id = ?
+             ORDER BY pws.created_at DESC",
+            [$wlId]
+        );
+
+        return $this->json($res, ['results' => $rows]);
+    }
+
     /** GET /personal-watchlists/shares/{shareId}/matches */
     public function shareMatches(Request $req, Response $res, array $args): Response
     {
