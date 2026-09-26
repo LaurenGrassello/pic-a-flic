@@ -188,6 +188,7 @@ $app->get('/personal-watchlists/shares/{shareId}/deck', [$personalWl, 'shareDeck
 $app->post('/personal-watchlists/shares/{shareId}/swipe', [$personalWl, 'shareSwipe'])->add($authMw);
 $app->get('/personal-watchlists/shares/{shareId}/matches', [$personalWl, 'shareMatches'])->add($authMw);
 $app->patch('/personal-watchlists/{id}', [$personalWl, 'rename'])->add($authMw);
+$app->get('/personal-watchlists/{id}/shares', [$personalWl, 'sentShares'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
