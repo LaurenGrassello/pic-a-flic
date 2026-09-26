@@ -4,7 +4,6 @@ declare (strict_types = 1);
 namespace PicaFlic\Application\Controller;
 
 use Doctrine\ORM\EntityManagerInterface;
-use PicaFlic\Infrastructure\Repository\FeedFilters;
 use PicaFlic\Infrastructure\Tmdb\TmdbClient;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -416,9 +415,9 @@ final class FeedController
         return $this->json($res, $rows);
     }
 
-/** GET /search?q=term&limit=40&page=1
- *  Tries DB (if tables exist) and falls back to TMDB search/multi.
- */
+    /** GET /search?q=term&limit=40&page=1
+     *  Tries DB (if tables exist) and falls back to TMDB search/multi.
+     */
     public function search(Request $req, Response $res): Response
     {
         $p = $req->getQueryParams();
@@ -441,89 +440,100 @@ final class FeedController
         $hasM = $schema->tablesExist(['movies']);
         $hasT = $schema->tablesExist(['tv_shows']);
 
-        // ---------- DB path (uses FeedFilters::byProviders) ----------
         $rows = [];
+
         try {
             if ($hasM && $wantM) {
-                $qm = $conn->createQueryBuilder()
-                    ->select("
-                    m.`id` AS id, m.`" . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('movies'));return in_array('tmdb_id', $c, true) ? 'tmdb_id' : 'id';})() . "` AS tmdb_id,
-                    0 AS is_tv,
-                    m.`" . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('movies'));return in_array('title', $c, true) ? 'title' : 'name';})() . "` AS title,
-                    " . (function () use ($schema) {
-                        $c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('movies'));
-                        foreach (['popularity', 'vote_average', 'vote_count'] as $k) {
-                            if (in_array($k, $c, true)) {
-                                return "m.`$k`";
-                            }
-                        }
+                $rowsM = $conn->executeQuery(
+                    "
+                    SELECT
+                        m.id,
+                        m.tmdb_id,
+                        0 AS is_tv,
+                        m.title,
+                        m.popularity,
+                        NULL AS release_date,
+                        m.poster_path,
+                        GROUP_CONCAT(DISTINCT tp.provider_id ORDER BY tp.provider_id) AS provider_ids,
+                        GROUP_CONCAT(DISTINCT ss.name ORDER BY tp.provider_id SEPARATOR '|') AS provider_names
+                    FROM movies m
+                    LEFT JOIN title_providers tp ON tp.tmdb_id = m.tmdb_id AND tp.is_tv = 0 AND tp.region = :region
+                    LEFT JOIN streaming_services ss ON ss.provider_id = tp.provider_id
+                    WHERE LOWER(m.title) LIKE :q
+                    GROUP BY m.id, m.tmdb_id, m.title, m.popularity, m.poster_path
+                    ORDER BY m.popularity DESC
+                    LIMIT :limit OFFSET :offset
+                    ",
+                    [
+                        'q' => '%' . mb_strtolower($q) . '%',
+                        'region' => $region,
+                        'limit' => $limit,
+                        'offset' => $offset,
+                    ],
+                    [
+                        'q' => \PDO::PARAM_STR,
+                        'region' => \PDO::PARAM_STR,
+                        'limit' => \PDO::PARAM_INT,
+                        'offset' => \PDO::PARAM_INT,
+                    ]
+                )->fetchAllAssociative();
 
-                        return "1";
-                    })() . " AS popularity,
-                    NULL AS release_date,
-                    " . (function () use ($schema) {
-                        $c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('movies'));
-                        foreach (['poster_path', 'poster', 'poster_url', 'posterurl'] as $k) {
-                            if (in_array($k, $c, true)) {
-                                return "m.`$k`";
-                            }
-                        }
-
-                        return "NULL";
-                    })() . " AS poster_path
-                ")
-                    ->from('movies', 'm')
-                    ->where('LOWER(m.`' . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('movies'));return in_array('title', $c, true) ? 'title' : 'name';})() . '`) LIKE :q')
-                    ->setParameter('q', '%' . mb_strtolower($q) . '%')
-                    ->setFirstResult($offset)
-                    ->setMaxResults($limit)
-                    ->add('orderBy', 'popularity DESC');
-
-                // provider filter (reuses your helper)
-                FeedFilters::byProviders($qm, $p, 'm', false, $region);
-
-                $rowsM = $conn->fetchAllAssociative($qm->getSQL(), $qm->getParameters());
                 $rows = array_merge($rows, $rowsM);
             }
 
             if ($hasT && $wantT) {
-                $qt = $conn->createQueryBuilder()
-                    ->select("
-                    t.`id` AS id, t.`" . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));return in_array('tmdb_id', $c, true) ? 'tmdb_id' : 'id';})() . "` AS tmdb_id,
-                    1 AS is_tv,
-                    t.`" . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));return in_array('name', $c, true) ? 'name' : 'title';})() . "` AS title,
-                    " . (function () use ($schema) {
-                        $c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));
-                        foreach (['popularity', 'vote_average', 'vote_count'] as $k) {
-                            if (in_array($k, $c, true)) {
-                                return "t.`$k`";
-                            }
-                        }
+                $tc = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));
+                $tTmdbCol = in_array('tmdb_id', $tc, true) ? 'tmdb_id' : 'id';
+                $tTitleCol = in_array('name', $tc, true) ? 'name' : 'title';
 
-                        return "1";
-                    })() . " AS popularity,
-                    NULL AS release_date,
-                    " . (function () use ($schema) {
-                        $c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));
-                        foreach (['poster_path', 'poster', 'poster_url', 'posterurl'] as $k) {
-                            if (in_array($k, $c, true)) {
-                                return "t.`$k`";
-                            }
-                        }
+                $tPosterCol = null;
+                foreach (['poster_path', 'poster', 'poster_url', 'posterurl'] as $cand) {
+                    if (in_array($cand, $tc, true)) {$tPosterCol = $cand;
+                        break;}
+                }
+                $tPopCol = null;
+                foreach (['popularity', 'vote_average', 'vote_count'] as $cand) {
+                    if (in_array($cand, $tc, true)) {$tPopCol = $cand;
+                        break;}
+                }
 
-                        return "NULL";
-                    })() . " AS poster_path
-                ")
-                    ->from('tv_shows', 't')
-                    ->where('LOWER(t.`' . (function () use ($schema) {$c = array_map(fn($c) => strtolower($c->getName()), $schema->listTableColumns('tv_shows'));return in_array('name', $c, true) ? 'name' : 'title';})() . '`) LIKE :q')
-                    ->setParameter('q', '%' . mb_strtolower($q) . '%')
-                    ->setFirstResult($offset)
-                    ->setMaxResults($limit)
-                    ->add('orderBy', 'popularity DESC');
+                $posterExpr = $tPosterCol ? "t.`$tPosterCol`" : "NULL";
+                $popExpr = $tPopCol ? "t.`$tPopCol`" : "1";
 
-                FeedFilters::byProviders($qt, $p, 't', true, $region);
+                $rowsT = $conn->executeQuery(
+                    "
+                    SELECT
+                        t.id,
+                        t.`$tTmdbCol` AS tmdb_id,
+                        1 AS is_tv,
+                        t.`$tTitleCol` AS title,
+                        $popExpr AS popularity,
+                        NULL AS release_date,
+                        $posterExpr AS poster_path,
+                        GROUP_CONCAT(DISTINCT tp.provider_id ORDER BY tp.provider_id) AS provider_ids,
+                        GROUP_CONCAT(DISTINCT ss.name ORDER BY tp.provider_id SEPARATOR '|') AS provider_names
+                    FROM tv_shows t
+                    LEFT JOIN title_providers tp ON tp.tmdb_id = t.`$tTmdbCol` AND tp.is_tv = 1 AND tp.region = :region
+                    LEFT JOIN streaming_services ss ON ss.provider_id = tp.provider_id
+                    WHERE LOWER(t.`$tTitleCol`) LIKE :q
+                    GROUP BY t.id, t.`$tTmdbCol`, t.`$tTitleCol`
+                    ORDER BY popularity DESC
+                    LIMIT :limit OFFSET :offset
+                    ",
+                    [
+                        'q' => '%' . mb_strtolower($q) . '%',
+                        'region' => $region,
+                        'limit' => $limit,
+                        'offset' => $offset,
+                    ],
+                    [
+                        'q' => \PDO::PARAM_STR,
+                        'region' => \PDO::PARAM_STR,
+                        'limit' => \PDO::PARAM_INT,
+                        'offset' => \PDO::PARAM_INT,
+                    ]
+                )->fetchAllAssociative();
 
-                $rowsT = $conn->fetchAllAssociative($qt->getSQL(), $qt->getParameters());
                 $rows = array_merge($rows, $rowsT);
             }
 
@@ -544,7 +554,7 @@ final class FeedController
         $provIds = $this->resolveProviderIds($tokens);
         $needProvFilter = !empty($provIds);
 
-        $take = function (string $kind) use ($limit, $page, $region, $q, $provIds, $needProvFilter) {
+        $take = function (string $kind) use ($limit, $page, $region, $q, $provIds, $needProvFilter, $conn) {
             $rows = [];
             $data = $this->tmdb->search($kind, $q, ['page' => $page, 'include_adult' => 'true', 'region' => $region]);
             foreach (($data['results'] ?? []) as $r) {
@@ -553,15 +563,32 @@ final class FeedController
                     continue;
                 }
 
-                // provider filter if requested
+                $plist = $this->tmdb->titleProviders($kind, $id, $region);
+                $ids = array_values(array_unique(array_map(fn($pv) => (int) $pv['id'], $plist)));
+
                 if ($needProvFilter) {
-                    $plist = $this->tmdb->titleProviders($kind, $id, $region);
-                    $ids = array_map(fn($p) => (int) $p['id'], $plist);
                     $ok = count(array_intersect($ids, $provIds)) > 0;
                     if (!$ok) {
                         continue;
                     }
+                }
 
+                $providerIds = null;
+                $providerNames = null;
+                if (!empty($ids)) {
+                    sort($ids);
+                    $namesMap = [];
+                    $providerRows = $conn->executeQuery(
+                        'SELECT provider_id, name FROM streaming_services WHERE provider_id IN (:ids)',
+                        ['ids' => $ids],
+                        ['ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER]
+                    )->fetchAllAssociative();
+                    foreach ($providerRows as $pr) {
+                        $namesMap[(int) $pr['provider_id']] = $pr['name'];
+                    }
+
+                    $providerIds = implode(',', $ids);
+                    $providerNames = implode('|', array_filter(array_map(fn($pid) => $namesMap[$pid] ?? null, $ids)));
                 }
 
                 $rows[] = [
@@ -572,12 +599,13 @@ final class FeedController
                     'popularity' => (float) ($r['popularity'] ?? 0),
                     'release_date' => $kind === 'tv' ? ($r['first_air_date'] ?? null) : ($r['release_date'] ?? null),
                     'poster_path' => $r['poster_path'] ?? null,
+                    'provider_ids' => $providerIds,
+                    'provider_names' => $providerNames,
                 ];
 
                 if (count($rows) >= $limit) {
                     break;
                 }
-
             }
             return $rows;
         };
