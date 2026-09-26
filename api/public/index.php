@@ -53,7 +53,7 @@ $app->add(function (Request $req, $handler) use ($allowed) {
 
     return $res
         ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+        ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
 });
 
 // Preflight
@@ -163,7 +163,6 @@ $app->post('/profile/username', [$social, 'updateUsername'])->add($authMw);
 $app->get('/social/watchlists/{watchlistId}', [$social, 'watchlist'])->add($authMw);
 $app->patch('/social/watchlists/{watchlistId}', [$social, 'renameWatchlist'])->add($authMw);
 $app->delete('/social/watchlists/{watchlistId}', [$social, 'deleteWatchlist'])->add($authMw);
-$app->patch('/personal-watchlists/{id}', [$personalWl, 'rename'])->add($authMw);
 
 // Messages
 $messages = $container->get(\PicaFlic\Application\Controller\MessageController::class);
@@ -188,6 +187,7 @@ $app->post('/personal-watchlists/shares/{shareId}/decline', [$personalWl, 'decli
 $app->get('/personal-watchlists/shares/{shareId}/deck', [$personalWl, 'shareDeck'])->add($authMw);
 $app->post('/personal-watchlists/shares/{shareId}/swipe', [$personalWl, 'shareSwipe'])->add($authMw);
 $app->get('/personal-watchlists/shares/{shareId}/matches', [$personalWl, 'shareMatches'])->add($authMw);
+$app->patch('/personal-watchlists/{id}', [$personalWl, 'rename'])->add($authMw);
 
 // ---------------------------------------------------------
 // Feed (lazy resolve MovieRepository so /health doesn’t hit DB)
@@ -226,7 +226,7 @@ $customErrorHandler = function (
             ->withHeader('Access-Control-Allow-Origin', $origin)
             ->withHeader('Vary', 'Origin')
             ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+            ->withHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
     }
 
     return $response;
